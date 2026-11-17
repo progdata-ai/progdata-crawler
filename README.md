@@ -26,3 +26,7 @@ uv run pre-commit install    # run the checks on every commit
 ```
 
 See [CLAUDE.md](CLAUDE.md) for the codebase rules and the git workflow.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE). You are free to fork, change and use the code, also commercially, as long as you keep the license and the [NOTICE](NOTICE) file. The license does not grant the right to use the Progdata name or trademarks.

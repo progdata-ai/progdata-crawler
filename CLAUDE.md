@@ -16,6 +16,7 @@ All four must pass before a change is pushed.
 
 ## Rules
 
+- **Project license.** The project is licensed under Apache 2.0 (`LICENSE`, `NOTICE`). Do not add license headers to source files; the root files cover the whole repo.
 - **Language.** Everything in the repo is written in English: code, names, comments, docstrings, tests, error messages, docs, commit messages, pull requests and issues.
 - **Names.** The package is `progdata-crawler`, the import is `progdata_crawler`, the CLI command is `progdata-crawler` (alias `pdc`), and MCP tools are named `pdc_*`.
 - **Original work only.** Do not mention other crawler products by name anywhere: code, comments, docs, tests or commit messages. Do not copy code, test data, documentation or API design from other crawler projects. Write everything from scratch.
