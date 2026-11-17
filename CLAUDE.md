@@ -34,10 +34,10 @@ Pin third-party GitHub Actions to a full commit SHA, with the version in a comme
 - **Original work only.** Do not mention other crawler products by name anywhere: code, comments, docs, tests or commit messages. Do not copy code, test data, documentation or API design from other crawler projects. Write everything from scratch.
 - **Licenses.** Python dependencies that are linked into the code must use one of these licenses: MIT, BSD, Apache 2.0, ISC, PSF or MPL-2.0. MPL-2.0 packages are used unmodified. No GPL, LGPL or AGPL. Services that run separately in their own container, such as SearXNG, are allowed.
 - **Tests.** Never test against external websites. Use the local test site server (`tests/`) instead.
-- **Errors.** The core raises `progdata_crawler.core.errors.CrawlerError` with an `ErrorCode` for every expected failure. Entry points turn it into their own format. `tests/test_architecture.py` fails if the core imports from `api/` or from CLI, REST or MCP frameworks.
 - **Types.** Pyright runs in strict mode. Every interface (CLI, MCP, REST) uses typed Pydantic models from `progdata_crawler.models`.
 - **Configuration and logging.** Read settings with `progdata_crawler.settings.get_settings()`, never from `os.environ` directly. Log with `logging.getLogger(__name__)` and pass context as `extra={...}`, not inside the message. Never log secrets or page content.
 - **Politeness is not optional.** Respect robots.txt, rate limit per domain and use an honest User-Agent. No proxy rotation, fingerprint spoofing, CAPTCHA solving or other ways around blocking. When a site blocks us, return `blocked_by_site`.
+- **Errors.** The core raises `progdata_crawler.core.errors.CrawlerError` with an `ErrorCode` for every expected failure. Entry points turn it into their own format. `tests/test_architecture.py` fails if the core imports from `api/` or from CLI, REST or MCP frameworks.
 
 ## Git workflow
 
