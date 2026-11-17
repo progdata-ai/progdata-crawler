@@ -12,7 +12,18 @@ uv run ruff format     # format
 uv run pyright         # type check (strict)
 ```
 
-All four must pass before a change is pushed.
+All four must pass before a change is pushed. CI (`.github/workflows/ci.yml`) runs the same checks on every pull request.
+
+CI also checks the licenses of the runtime dependencies. To run that check locally:
+
+```bash
+uv sync --no-dev --group licenses
+uv run --no-sync pip-licenses --from=mixed --ignore-packages progdata-crawler \
+  --partial-match --allow-only="MIT;BSD;Apache"
+uv sync                # restore the dev environment afterwards
+```
+
+Pin third-party GitHub Actions to a full commit SHA, with the version in a comment.
 
 ## Rules
 
