@@ -127,6 +127,7 @@ The same options work in the CLI, the MCP tool and the REST API.
 | `fetch_timeout` | 504 | The page did not respond within `timeout_ms` |
 | `fetch_failed` | 502 | DNS failure, refused connection, broken TLS, too many redirects |
 | `unsupported_type` | 415 | Not an HTML page, or larger than 10 MB |
+| `not_found` | 404 | No job with this id, or it has been deleted |
 | `internal_error` | 500 | Something went wrong on our side |
 
 ## Configuration
@@ -135,17 +136,39 @@ Set with environment variables, or in a `.env` file in the working directory.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `PDC_DATA_DIR` | `~/.progdata-crawler` | Where the SQLite cache lives |
+| `PDC_DATA_DIR` | `~/.progdata-crawler` | Where the SQLite cache and the job table live |
 | `PDC_TIMEOUT_MS` | 30 000 | Default time limit per page |
 | `PDC_RATE_LIMIT_INTERVAL_S` | 1.0 | Minimum seconds between requests to the same host |
 | `PDC_ALLOW_PRIVATE_NETWORKS` | unset | Whether internal addresses (127.0.0.1, 10.x, 169.254.169.254 …) may be fetched. Unset: allowed for the CLI and MCP over stdio, refused for `serve` and `mcp --http` |
 | `PDC_ROBOTS_ALLOWLIST` | `[]` | JSON list of domains where robots.txt is not applied, for our own sites or sites that gave us permission |
 | `PDC_BROWSER_EXECUTABLE` | unset | Use this Chromium instead of the one Playwright installs |
 | `PDC_BROWSER_MAX_PAGES` | 4 | Pages the browser may render at the same time |
+| `PDC_RETENTION_DAYS` | 7 | Cached pages and finished jobs older than this are deleted |
+| `PDC_MAX_CONCURRENT_JOBS` | 2 | Jobs (harvest, bulk) that run at the same time |
+| `PDC_BULK_CONCURRENCY` | 8 | Pages bulk jobs fetch at the same time, across all bulk jobs |
+| `PDC_WEBHOOK_SECRET` | unset | Key that signs webhooks to `notify_url`. Jobs with a `notify_url` are refused while unset |
 | `PDC_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR` |
 | `PDC_LOG_FORMAT` | `text` | `text` or `json` (one object per line) |
 
 Logs go to stderr.
+
+## Webhooks
+
+Harvest and bulk jobs accept a `notify_url`. It receives a POST when the job starts and when it ends (`job.started`, `job.succeeded`, `job.failed`, `job.cancelled`, `job.interrupted`). The body is `{"event": ..., "job": {...}}` with the job's status and progress, never page content.
+
+Each request carries `X-PDC-Timestamp` (Unix seconds) and `X-PDC-Signature: sha256=<hex>`, the HMAC-SHA256 of `<timestamp>.<body>` with `PDC_WEBHOOK_SECRET`. Check the signature with a constant-time comparison and reject timestamps more than a few minutes old, so a captured request cannot be replayed:
+
+```python
+import hashlib, hmac, time
+
+def valid(secret: bytes, timestamp: str, body: bytes, signature: str) -> bool:
+    if abs(time.time() - int(timestamp)) > 300:
+        return False
+    expected = hmac.new(secret, timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest("sha256=" + expected, signature)
+```
+
+Failed deliveries (network errors, 5xx, 429) are retried after 1, 2, 4, 8 and 16 seconds, within one minute. Webhooks to internal addresses are refused like any other request from a shared entry point, and redirects are not followed.
 
 ## Development
 

@@ -30,7 +30,7 @@ async def bulk(
     crawler: Crawler, request: BulkRequest, ctx: JobContext, slots: asyncio.Semaphore
 ) -> None:
     """Fetch every URL in `request` and report each one to `ctx`."""
-    options = request.model_dump(exclude={"urls"})
+    options = request.model_dump(exclude={"urls", "notify_url"})
     urls = unique_urls(request)
     await ctx.set_total(len(urls))
 

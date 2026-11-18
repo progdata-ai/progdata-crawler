@@ -54,13 +54,24 @@ class InProcessQueue:
         handlers: Mapping[JobKind, JobHandler],
         *,
         max_concurrent: int = 2,
+        on_change: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
+        """`on_change` is called with the job id after every status change."""
         self._store = store
         self._handlers = dict(handlers)
         self._slots = asyncio.Semaphore(max_concurrent)
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._cancelled: set[str] = set()
         self._closing = False
+        self._on_change = on_change
+
+    async def _changed(self, job_id: str) -> None:
+        if self._on_change is None:
+            return
+        try:
+            await self._on_change(job_id)
+        except Exception:
+            log.exception("status change listener failed", extra={"job_id": job_id})
 
     async def submit(self, job_id: str) -> None:
         task = asyncio.create_task(self._run(job_id), name=f"job-{job_id}")
@@ -79,6 +90,7 @@ class InProcessQueue:
             await asyncio.gather(task, return_exceptions=True)
         else:
             await asyncio.to_thread(self._store.mark_finished, job_id, JobStatus.CANCELLED)
+            await self._changed(job_id)
         return True
 
     async def wait(self, job_id: str) -> None:
@@ -102,6 +114,7 @@ class InProcessQueue:
                 if job is None or job.status is not JobStatus.QUEUED:
                     return
                 await asyncio.to_thread(self._store.mark_started, job_id)
+                await self._changed(job_id)
                 await self._handlers[job.kind](job, JobContext(job, self._store))
         except asyncio.CancelledError:
             status = (
@@ -110,17 +123,21 @@ class InProcessQueue:
                 else JobStatus.INTERRUPTED
             )
             await asyncio.to_thread(self._store.mark_finished, job_id, status)
+            await self._changed(job_id)
             return
         except CrawlerError as error:
             await asyncio.to_thread(
                 self._store.mark_finished, job_id, JobStatus.FAILED, error.to_error_info()
             )
+            await self._changed(job_id)
             return
         except Exception:
             log.exception("job failed", extra={"job_id": job_id})
             info = ErrorInfo(code=ErrorCode.INTERNAL_ERROR, message="unexpected internal error")
             await asyncio.to_thread(self._store.mark_finished, job_id, JobStatus.FAILED, info)
+            await self._changed(job_id)
             return
         finally:
             self._cancelled.discard(job_id)
         await asyncio.to_thread(self._store.mark_finished, job_id, JobStatus.SUCCEEDED)
+        await self._changed(job_id)

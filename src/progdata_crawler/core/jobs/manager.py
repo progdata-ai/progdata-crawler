@@ -7,7 +7,9 @@ from types import TracebackType
 from typing import Any, Self
 
 from progdata_crawler.core.errors import CrawlerError
+from progdata_crawler.core.fetch.guard import AddressGuard
 from progdata_crawler.core.jobs.cleanup import RetentionCleaner
+from progdata_crawler.core.jobs.notify import WebhookNotifier
 from progdata_crawler.core.jobs.queue import InProcessQueue, JobHandler
 from progdata_crawler.core.jobs.store import JobStore
 from progdata_crawler.core.store.sqlite import PageStore
@@ -27,10 +29,21 @@ class JobManager:
         *,
         page_store: PageStore,
         store_path: Path | str | None = None,
+        notifier: WebhookNotifier | None = None,
     ) -> None:
         self._store = JobStore(store_path if store_path is not None else settings.jobs_db_path)
+        self._guard = AddressGuard(allow_private=bool(settings.allow_private_networks))
+        secret = settings.webhook_secret
+        self._notifier = notifier or WebhookNotifier(
+            secret.get_secret_value() if secret is not None else None,
+            settings.user_agent,
+            self._guard,
+        )
         self._queue = InProcessQueue(
-            self._store, handlers, max_concurrent=settings.max_concurrent_jobs
+            self._store,
+            handlers,
+            max_concurrent=settings.max_concurrent_jobs,
+            on_change=self._status_changed,
         )
         self._cleaner = RetentionCleaner(
             self._store, page_store, retention_days=settings.retention_days
@@ -63,11 +76,20 @@ class JobManager:
     async def aclose(self) -> None:
         await self._cleaner.aclose()
         await self._queue.aclose()
+        await self._notifier.aclose()
         self._store.close()
 
     async def submit(
         self, kind: JobKind, request: dict[str, Any], *, retain: Retention = Retention.DEFAULT
     ) -> Job:
+        notify_url = request.get("notify_url")
+        if notify_url is not None:
+            if not self._notifier.enabled:
+                raise CrawlerError(
+                    ErrorCode.INVALID_REQUEST,
+                    "notify_url needs a webhook secret: set PDC_WEBHOOK_SECRET",
+                )
+            await self._guard.check_url(str(notify_url))
         job = await asyncio.to_thread(self._store.create, kind, request, retain)
         await self._queue.submit(job.id)
         return job
@@ -113,6 +135,11 @@ class JobManager:
         if job is None:  # deleted by the cleanup in the meantime
             raise _not_found(job_id)
         return job
+
+    async def _status_changed(self, job_id: str) -> None:
+        job = await self.get(job_id)
+        if job is not None:
+            self._notifier.notify(job)
 
     async def _existing(self, job_id: str) -> Job:
         job = await self.get(job_id)
