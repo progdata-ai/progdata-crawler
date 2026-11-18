@@ -10,6 +10,8 @@ def test_exports_a_schema_for_every_public_model() -> None:
         "FindRequest",
         "FindResult",
         "SearchHit",
+        "ConvertRequest",
+        "ConvertResult",
         "QueryRequest",
         "QueryResult",
         "QueryHit",

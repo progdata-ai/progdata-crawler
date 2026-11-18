@@ -1,6 +1,7 @@
 """Pydantic models shared by all entry points."""
 
 from progdata_crawler.models.bulk import BulkRequest
+from progdata_crawler.models.convert import ConvertRequest, ConvertResult, DocumentType
 from progdata_crawler.models.discover import (
     DiscoveredUrl,
     DiscoverRequest,
@@ -49,10 +50,13 @@ __all__ = [
     "DEFAULT_OUTPUTS",
     "BulkRequest",
     "ContentMode",
+    "ConvertRequest",
+    "ConvertResult",
     "Device",
     "DiscoverRequest",
     "DiscoverResult",
     "DiscoveredUrl",
+    "DocumentType",
     "Envelope",
     "ErrorCode",
     "ErrorInfo",
