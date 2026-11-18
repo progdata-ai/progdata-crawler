@@ -47,6 +47,7 @@ from progdata_crawler.models.schema import json_schemas
 from progdata_crawler.models.session import SessionOpenRequest, SessionStepRequest, SessionView
 from progdata_crawler.models.steps import Capture, Step
 from progdata_crawler.models.structure import StructureSpec
+from progdata_crawler.models.structure_request import StructureRequest, StructureResult
 
 __all__ = [
     "DEFAULT_CACHE_TTL_SECONDS",
@@ -97,6 +98,8 @@ __all__ = [
     "SessionStepRequest",
     "SessionView",
     "Step",
+    "StructureRequest",
+    "StructureResult",
     "StructureSpec",
     "TimeRange",
     "UrlSource",
