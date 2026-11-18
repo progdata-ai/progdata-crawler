@@ -24,6 +24,7 @@ def test_defaults() -> None:
     assert settings.cache_db_path == settings.data_dir / "cache.sqlite3"
     assert settings.log_level is LogLevel.INFO
     assert settings.log_format is LogFormat.TEXT
+    assert settings.rate_limit_interval_s == 1.0
 
 
 def test_user_agent_names_product_version_and_info_page() -> None:
@@ -65,6 +66,8 @@ def test_reads_dotenv_file_and_environment_wins(
         ("PDC_LOG_LEVEL", "LOUD"),
         ("PDC_LOG_FORMAT", "xml"),
         ("PDC_USER_AGENT", ""),
+        ("PDC_RATE_LIMIT_INTERVAL_S", "0"),
+        ("PDC_RATE_LIMIT_INTERVAL_S", "61"),
     ],
 )
 def test_rejects_invalid_values(monkeypatch: pytest.MonkeyPatch, name: str, value: str) -> None:
