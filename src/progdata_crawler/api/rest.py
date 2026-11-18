@@ -18,6 +18,7 @@ from progdata_crawler.core.crawler import Crawler
 from progdata_crawler.core.discover import discover_envelope
 from progdata_crawler.core.envelopes import enveloped
 from progdata_crawler.core.errors import CrawlerError
+from progdata_crawler.core.find import SearchProvider, create_provider, find
 from progdata_crawler.core.jobs.events import job_events
 from progdata_crawler.core.jobs.handlers import job_handlers as default_job_handlers
 from progdata_crawler.core.jobs.manager import JobManager
@@ -31,6 +32,8 @@ from progdata_crawler.models import (
     ErrorCode,
     ErrorInfo,
     FetchRequest,
+    FindRequest,
+    FindResult,
     HarvestRequest,
     Job,
     JobEvent,
@@ -108,6 +111,7 @@ def create_app(
     *,
     store_path: str | None = None,
     job_handlers: Mapping[JobKind, JobHandler] | None = None,
+    search_provider: SearchProvider | None = None,
 ) -> FastAPI:
     """Build the REST app. The crawler and the job service start and stop with the app."""
 
@@ -123,7 +127,12 @@ def create_app(
         ):
             app.state.crawler = crawler
             app.state.jobs = jobs
-            yield
+            provider = search_provider or create_provider(settings)
+            app.state.search = provider
+            try:
+                yield
+            finally:
+                await provider.aclose()
 
     app = FastAPI(
         title="progdata-crawler",
@@ -180,6 +189,24 @@ def create_app(
             crawler, body, request_id=request.headers.get(REQUEST_ID_HEADER)
         )
         return _envelope_response(envelope)
+
+    @app.post(
+        "/v1/find",
+        response_model=Envelope[FindResult],
+        responses={
+            **ERROR_RESPONSES,
+            503: {"model": Envelope[Page], "description": "search_unavailable"},
+        },
+        summary="Search the web",
+        description="Search the web through the configured provider. With `fetch`, every "
+        "web and news hit is also fetched with those page options and returned with it.",
+    )
+    async def find_endpoint(  # pyright: ignore[reportUnusedFunction]
+        body: FindRequest, request: Request
+    ) -> JSONResponse:
+        crawler: Crawler = request.app.state.crawler
+        provider: SearchProvider = request.app.state.search
+        return await _enveloped(FindResult, find(crawler, provider, body), request)
 
     @app.post(
         "/v1/query",
