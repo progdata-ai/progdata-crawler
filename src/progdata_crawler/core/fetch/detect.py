@@ -66,7 +66,7 @@ def looks_like_js_shell(html: str) -> bool:
 
 def needs_browser_features(options: PageOptions) -> bool:
     """True when the request asks for something only a browser can do."""
-    return Output.SCREENSHOT in options.outputs or options.wait_ms > 0
+    return Output.SCREENSHOT in options.outputs or options.wait_ms > 0 or bool(options.steps)
 
 
 def check_render_options(options: PageOptions) -> None:
@@ -74,7 +74,7 @@ def check_render_options(options: PageOptions) -> None:
     if options.render is RenderMode.NEVER and needs_browser_features(options):
         raise CrawlerError(
             ErrorCode.INVALID_REQUEST,
-            "screenshot and wait_ms need a browser, but render is 'never'",
+            "screenshot, wait_ms and steps need a browser, but render is 'never'",
         )
 
 

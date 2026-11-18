@@ -10,6 +10,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from progdata_crawler.models.steps import MAX_STEPS, Step
+
 DEFAULT_CACHE_TTL_SECONDS = 24 * 60 * 60
 """Default maximum age of a cached result: 24 hours."""
 
@@ -126,6 +128,9 @@ class PageOptions(_StrictModel):
     timeout_ms: int = Field(default=DEFAULT_TIMEOUT_MS, gt=0, le=MAX_TIMEOUT_MS)
     """Time limit for the page."""
     retain: Retention = Retention.DEFAULT
+    steps: tuple[Step, ...] = Field(default=(), max_length=MAX_STEPS)
+    """Browser steps to run after the page has loaded (click, type, press, scroll, wait,
+    capture). Pages with steps always use the browser and are never cached."""
 
     @field_validator("outputs")
     @classmethod
