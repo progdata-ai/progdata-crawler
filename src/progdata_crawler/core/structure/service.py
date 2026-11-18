@@ -4,6 +4,7 @@ from progdata_crawler.core.crawler import Crawler
 from progdata_crawler.core.errors import CrawlerError
 from progdata_crawler.core.jobs.manager import JobManager
 from progdata_crawler.models.bulk import BulkRequest
+from progdata_crawler.models.envelope import ErrorCode
 from progdata_crawler.models.fetch import FetchRequest
 from progdata_crawler.models.jobs import JobKind
 from progdata_crawler.models.options import Output
@@ -12,7 +13,7 @@ from progdata_crawler.models.structure_request import StructureRequest, Structur
 
 async def structure(
     crawler: Crawler,
-    jobs: JobManager,
+    jobs: JobManager | None,
     request: StructureRequest,
     *,
     wait_s: float = 0,
@@ -29,6 +30,8 @@ async def structure(
         if failure is not None:
             raise CrawlerError(failure.code, failure.message, **failure.details)
         return StructureResult(url=page.url, data=page.structured)
+    if jobs is None:
+        raise CrawlerError(ErrorCode.INVALID_REQUEST, "several URLs need the job service")
     bulk = BulkRequest.model_validate({**options, "urls": request.urls})
     view = await jobs.start_job(JobKind.BULK, bulk, wait_s=wait_s, limit=limit)
     return StructureResult(job=view)

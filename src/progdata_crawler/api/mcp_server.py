@@ -23,6 +23,7 @@ from progdata_crawler.core.jobs.handlers import job_handlers
 from progdata_crawler.core.jobs.manager import JobManager
 from progdata_crawler.core.session.browser_session import SessionManager
 from progdata_crawler.core.store.query import query_pages
+from progdata_crawler.core.structure.service import structure as structure_data
 from progdata_crawler.models import (
     DEFAULT_OUTPUTS,
     BulkRequest,
@@ -55,6 +56,7 @@ from progdata_crawler.models import (
     TimeRange,
 )
 from progdata_crawler.models.jobs import MAX_JOB_WAIT_S
+from progdata_crawler.models.structure_request import StructureRequest, StructureResult
 from progdata_crawler.settings import Settings
 
 INSTRUCTIONS = (
@@ -141,6 +143,12 @@ def _invalid[T](result_type: type[T], error: ValidationError) -> Envelope[T]:
         ),
     )
 
+
+STRUCTURE_DESCRIPTION = (
+    "Extract data that fits a JSON Schema from web pages, with the LLM. One URL answers "
+    "directly with `data`. Several URLs run as a job: waits up to `wait_s` and returns "
+    "`job` with each page's `structured`; follow a running job with pdc_job."
+)
 
 FIND_DESCRIPTION = (
     "Search the web. Returns hits with URL, title and snippet. With fetch=true every web and "
@@ -260,6 +268,19 @@ def create_server(
         retain: Annotated[
             Retention, Field(description="'none' stores nothing after the response.")
         ] = Retention.DEFAULT,
+        steps: Annotated[
+            list[dict[str, Any]] | None,
+            Field(
+                description="Browser steps after load, e.g. "
+                '[{"action": "click", "selector": "#more"}, {"action": "wait", "selector": ".x"}].'
+            ),
+        ] = None,
+        structure: Annotated[
+            dict[str, Any] | None,
+            Field(
+                description='For the structured output: {"schema": {...}, "instruction": "..."}.'
+            ),
+        ] = None,
     ) -> Envelope[Page]:
         fields: dict[str, Any] = {
             "url": url,
@@ -277,6 +298,10 @@ def create_server(
             fields["timeout_ms"] = timeout_ms
         if cache_ttl is not None:
             fields["cache_ttl"] = cache_ttl
+        if steps:
+            fields["steps"] = steps
+        if structure is not None:
+            fields["structure"] = structure
         try:
             request = FetchRequest.model_validate(fields)
         except ValidationError as error:
@@ -437,6 +462,12 @@ def create_server(
         exclude_paths: ExcludePaths = None,
         scope: ScopeArg = Scope.SITE,
         sitemaps: Annotated[bool, Field(description="Also start from the sitemaps.")] = True,
+        goal: Annotated[
+            str | None,
+            Field(
+                description="What you look for; relevant pages are fetched first (uses the LLM)."
+            ),
+        ] = None,
         outputs: Outputs = DEFAULT_OUTPUTS,
         content: Content = ContentMode.MAIN,
         render: Render = RenderMode.AUTO,
@@ -447,6 +478,7 @@ def create_server(
         try:
             request = HarvestRequest.model_validate(
                 {
+                    "goal": goal,
                     "url": url,
                     "max_pages": max_pages,
                     "max_depth": max_depth,
@@ -463,6 +495,30 @@ def create_server(
             return _invalid(JobView, error)
         operation = jobs().start_job(JobKind.HARVEST, request, wait_s=wait_s, limit=limit)
         return await enveloped(JobView, operation)
+
+    @server.tool(
+        name="pdc_structure",
+        title="Extract structured data",
+        description=STRUCTURE_DESCRIPTION,
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+    )
+    async def pdc_structure(  # pyright: ignore[reportUnusedFunction]
+        urls: Annotated[list[str], Field(description="The pages to extract from.")],
+        schema: Annotated[
+            dict[str, Any], Field(description="JSON Schema of the result; an object at the top.")
+        ],
+        instruction: Annotated[str, Field(description="What to extract, in plain words.")] = "",
+        wait_s: WaitS = 30,
+        limit: Annotated[int, Field(description="Most results in this answer.")] = 100,
+    ) -> Envelope[StructureResult]:
+        try:
+            request = StructureRequest.model_validate(
+                {"urls": urls, "structure": {"schema": schema, "instruction": instruction}}
+            )
+        except ValidationError as error:
+            return _invalid(StructureResult, error)
+        operation = structure_data(crawler(), jobs(), request, wait_s=wait_s, limit=limit)
+        return await enveloped(StructureResult, operation)
 
     @server.tool(
         name="pdc_bulk",

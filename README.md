@@ -42,6 +42,7 @@ The MCP server gives Claude these tools:
 | `pdc_find` | Search the web; with `fetch` also read the hits |
 | `pdc_convert` | A PDF, DOCX or XLSX document at a URL as markdown |
 | `pdc_session` | Use a page step by step in a browser session that stays open |
+| `pdc_structure` | Extract data that fits a JSON Schema from one or more pages |
 | `pdc_discover` | List a site's URLs from its sitemaps and start page |
 | `pdc_harvest` | Crawl a site within `max_pages` and `max_depth` (a job) |
 | `pdc_bulk` | Fetch many URLs in parallel (a job) |
@@ -94,6 +95,10 @@ pdc fetch https://example.com/report.pdf             # PDF, DOCX and XLSX become
 pdc find "sourdough starter" --fetch                  # search and read the hits
 pdc find "bakery" -s news --time-range week --json
 pdc convert report.pdf                                # a local file or a URL
+pdc structure https://example.com/product --schema price.json --instruction "the price"
+pdc fetch https://example.com/search --steps steps.json   # browser steps from a JSON file
+pdc harvest https://example.com/ --goal "pricing and plans" --max-pages 20
+pdc llm-check                                         # is the LLM set up?
 pdc discover https://example.com/ --include-path '^/docs/'   # one URL per line
 pdc harvest https://example.com/docs/ --max-pages 50 --max-depth 2 --json   # JSON lines
 pdc bulk https://example.com/a https://example.com/b
