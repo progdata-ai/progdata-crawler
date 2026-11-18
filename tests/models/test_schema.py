@@ -7,6 +7,7 @@ def test_exports_a_schema_for_every_public_model() -> None:
     schemas = json_schemas()
     assert set(schemas) == {
         "FetchRequest",
+        "BulkRequest",
         "PageOptions",
         "SelectorFilter",
         "PathFilter",

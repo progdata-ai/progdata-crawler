@@ -1,5 +1,6 @@
 """Pydantic models shared by all entry points."""
 
+from progdata_crawler.models.bulk import BulkRequest
 from progdata_crawler.models.discover import (
     DiscoveredUrl,
     DiscoverRequest,
@@ -35,6 +36,7 @@ from progdata_crawler.models.schema import json_schemas
 __all__ = [
     "DEFAULT_CACHE_TTL_SECONDS",
     "DEFAULT_OUTPUTS",
+    "BulkRequest",
     "ContentMode",
     "Device",
     "DiscoverRequest",
