@@ -158,3 +158,48 @@ def test_query_searches_fetched_pages(test_site: SiteServer) -> None:
 
     none = runner.invoke(app, ["query", "zebra"])
     assert none.exit_code == 0 and none.stdout == ""
+
+
+CHAT_COMPLETION = {
+    "id": "chat-1",
+    "object": "chat.completion",
+    "created": 0,
+    "model": "small",
+    "choices": [
+        {
+            "index": 0,
+            "message": {"role": "assistant", "content": "Blue"},
+            "finish_reason": "stop",
+        }
+    ],
+    "usage": {"prompt_tokens": 21, "completion_tokens": 1, "total_tokens": 22},
+}
+
+
+@pytest.mark.usefixtures("cli_env")
+def test_llm_check_against_an_ollama_style_server(
+    test_site: SiteServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    test_site.add(
+        "/v1/chat/completions", json.dumps(CHAT_COMPLETION), content_type="application/json"
+    )
+    monkeypatch.setenv("PDC_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("PDC_LLM_MODEL", "small")
+    monkeypatch.setenv("PDC_OLLAMA_URL", test_site.url("/v1"))
+    get_settings.cache_clear()
+
+    result = runner.invoke(app, ["llm-check"])
+    assert result.exit_code == 0, result.output
+    assert "Answer:   Blue" in result.stdout
+    assert "Tokens:   21 in, 1 out" in result.stdout
+    sent = json.loads(test_site.received[-1].body)
+    assert sent["model"] == "small"
+    assert "colour" in sent["messages"][-1]["content"]
+
+
+@pytest.mark.usefixtures("cli_env")
+def test_llm_check_without_configuration() -> None:
+    result = runner.invoke(app, ["llm-check"])
+    assert result.exit_code == 1
+    assert "llm_unavailable" in result.stderr
+    assert "PDC_LLM_PROVIDER" in result.stderr

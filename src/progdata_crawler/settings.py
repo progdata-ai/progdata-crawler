@@ -44,6 +44,15 @@ class SearchProviderName(StrEnum):
     """Pages already fetched, through the full-text index. Free, offline, no key."""
 
 
+class LlmProviderName(StrEnum):
+    ANTHROPIC = "anthropic"
+    """Claude through the Anthropic API. Needs `PDC_ANTHROPIC_API_KEY`."""
+    AZURE_OPENAI = "azure_openai"
+    """Azure OpenAI. Needs the endpoint, key and API version; the model is the deployment."""
+    OLLAMA = "ollama"
+    """A local Ollama server. Needs `PDC_LLM_MODEL`."""
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PDC_",
@@ -86,6 +95,20 @@ class Settings(BaseSettings):
     """Key for the Brave Search API."""
     brave_api_url: str = "https://api.search.brave.com/res/v1"
     """Address of the Brave Search API. Change it only for tests."""
+    llm_provider: LlmProviderName | None = None
+    """The LLM for summaries, structured extraction and goals. Unset: those features are off."""
+    llm_model: str | None = None
+    """Model name (Azure OpenAI: the deployment name). Anthropic defaults to claude-sonnet-5-5."""
+    anthropic_api_key: SecretStr | None = None
+    azure_openai_endpoint: str | None = None
+    """For example https://my-resource.openai.azure.com."""
+    azure_openai_api_key: SecretStr | None = None
+    azure_openai_api_version: str | None = None
+    ollama_url: str = "http://localhost:11434/v1"
+    llm_timeout_s: float = Field(default=60.0, gt=0, le=600)
+    """Time limit for one LLM call, retries included."""
+    llm_max_input_chars: int = Field(default=100_000, ge=1_000, le=2_000_000)
+    """Longer input is cut to this length before it is sent."""
     log_level: LogLevel = LogLevel.INFO
     log_format: LogFormat = LogFormat.TEXT
 

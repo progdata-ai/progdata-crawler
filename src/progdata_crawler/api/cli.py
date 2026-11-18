@@ -17,11 +17,13 @@ from progdata_crawler.core.convert.documents import (
 from progdata_crawler.core.crawler import Crawler
 from progdata_crawler.core.discover import discover_envelope
 from progdata_crawler.core.envelopes import enveloped
+from progdata_crawler.core.errors import CrawlerError
 from progdata_crawler.core.find import create_provider, find
 from progdata_crawler.core.jobs.events import job_events
 from progdata_crawler.core.jobs.handlers import job_handlers
 from progdata_crawler.core.jobs.manager import JobManager
 from progdata_crawler.core.store.query import query_pages
+from progdata_crawler.core.structure.llm import LlmAnswer, create_llm
 from progdata_crawler.log import configure_logging
 from progdata_crawler.models import (
     BulkRequest,
@@ -540,6 +542,35 @@ async def _convert(settings: Settings, target: str) -> Envelope[ConvertResult]:
         )
     content = await asyncio.to_thread(path.read_bytes)
     return await enveloped(ConvertResult, convert_bytes(content, source=path.name, name=path.name))
+
+
+LLM_CHECK_PROMPT = "Answer with one word: what colour is a clear daytime sky?"
+
+
+@app.command(name="llm-check")
+def llm_check() -> None:
+    """Send one short question to the configured LLM, to check that it works."""
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_format)
+    try:
+        answer = asyncio.run(_llm_check(_local(settings)))
+    except CrawlerError as error:
+        typer.echo(f"Error ({error.code.value}): {error.message}", err=True)
+        raise typer.Exit(1) from error
+    typer.echo(f"Provider: {settings.llm_provider.value if settings.llm_provider else '-'}")
+    typer.echo(f"Model:    {answer.model}")
+    typer.echo(f"Answer:   {answer.output.strip()}")
+    typer.echo(f"Tokens:   {answer.usage.input_tokens} in, {answer.usage.output_tokens} out")
+
+
+async def _llm_check(settings: Settings) -> LlmAnswer[str]:
+    async with Crawler(settings) as crawler:
+        llm = create_llm(settings, robots=crawler.check_robots)
+        return await llm.run(
+            instructions="You are a test. Keep the answer short.",
+            prompt=LLM_CHECK_PROMPT,
+            output_type=str,
+        )
 
 
 @app.command(name="query")
