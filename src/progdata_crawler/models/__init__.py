@@ -34,6 +34,7 @@ from progdata_crawler.models.options import (
     SelectorFilter,
 )
 from progdata_crawler.models.page import Image, Link, Page, PageMetadata
+from progdata_crawler.models.query import QueryHit, QueryRequest, QueryResult
 from progdata_crawler.models.schema import json_schemas
 
 __all__ = [
@@ -66,6 +67,9 @@ __all__ = [
     "PageMetadata",
     "PageOptions",
     "PathFilter",
+    "QueryHit",
+    "QueryRequest",
+    "QueryResult",
     "RenderMode",
     "Retention",
     "Scope",

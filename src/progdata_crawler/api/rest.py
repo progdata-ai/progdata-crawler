@@ -5,8 +5,6 @@ code in `error.code` and the matching HTTP status. Start it with `progdata-crawl
 """
 
 import logging
-import time
-import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Mapping
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
@@ -18,10 +16,12 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from progdata_crawler import __version__
 from progdata_crawler.core.crawler import Crawler
 from progdata_crawler.core.discover import discover_envelope
+from progdata_crawler.core.envelopes import enveloped
 from progdata_crawler.core.errors import CrawlerError
 from progdata_crawler.core.jobs.events import job_events
 from progdata_crawler.core.jobs.manager import JobManager
 from progdata_crawler.core.jobs.queue import JobHandler
+from progdata_crawler.core.store.query import query_pages
 from progdata_crawler.models import (
     DiscoverRequest,
     DiscoverResult,
@@ -36,6 +36,8 @@ from progdata_crawler.models import (
     JobView,
     Meta,
     Page,
+    QueryRequest,
+    QueryResult,
 )
 from progdata_crawler.models.jobs import MAX_RESULTS_PER_REQUEST
 from progdata_crawler.settings import Settings
@@ -73,19 +75,10 @@ async def _enveloped[T](
     result_type: type[T], operation: Awaitable[T], request: Request
 ) -> JSONResponse:
     """Run a core operation and wrap its result or `CrawlerError` in an envelope."""
-    request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
-    started = time.monotonic()
-    data: T | None = None
-    error: ErrorInfo | None = None
-    try:
-        data = await operation
-    except CrawlerError as exc:
-        error = exc.to_error_info()
-    except Exception:
-        log.exception("unexpected error", extra={"request_id": request_id})
-        error = ErrorInfo(code=ErrorCode.INTERNAL_ERROR, message="unexpected internal error")
-    meta = Meta(request_id=request_id, took_ms=round((time.monotonic() - started) * 1000))
-    return _envelope_response(Envelope[result_type](data=data, meta=meta, error=error))
+    envelope = await enveloped(
+        result_type, operation, request_id=request.headers.get(REQUEST_ID_HEADER)
+    )
+    return _envelope_response(envelope)
 
 
 async def _raise(error: CrawlerError) -> Job:
@@ -180,6 +173,20 @@ def create_app(
             crawler, body, request_id=request.headers.get(REQUEST_ID_HEADER)
         )
         return _envelope_response(envelope)
+
+    @app.post(
+        "/v1/query",
+        response_model=Envelope[QueryResult],
+        responses=ERROR_RESPONSES,
+        summary="Search pages fetched before",
+        description="Full-text search in the content of pages already fetched and cached. "
+        "Fetches nothing.",
+    )
+    async def query(  # pyright: ignore[reportUnusedFunction]
+        body: QueryRequest, request: Request
+    ) -> JSONResponse:
+        crawler: Crawler = request.app.state.crawler
+        return await _enveloped(QueryResult, query_pages(crawler.store, body), request)
 
     @app.get(
         "/v1/jobs/{job_id}",

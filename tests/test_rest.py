@@ -127,3 +127,12 @@ def test_discover_invalid_regex(client: TestClient, test_site: SiteServer) -> No
     )
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "invalid_request"
+
+
+def test_query(client: TestClient, test_site: SiteServer) -> None:
+    client.post("/v1/fetch", json={"url": test_site.url("/article.html")})
+    response = client.post("/v1/query", json={"query": "sourdough"})
+    assert response.status_code == 200
+    hits = response.json()["data"]["hits"]
+    assert [hit["url"] for hit in hits] == [test_site.url("/article.html")]
+    assert client.post("/v1/query", json={"query": ""}).status_code == 422

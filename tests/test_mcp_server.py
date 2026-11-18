@@ -24,8 +24,10 @@ async def connect(tmp_path: Path, test_site: SiteServer) -> AsyncGenerator[Clien
         yield connected
 
 
-async def call(client: Client, arguments: dict[str, Any]) -> dict[str, Any]:
-    result = await client.call_tool("pdc_fetch", arguments)
+async def call(
+    client: Client, arguments: dict[str, Any], tool: str = "pdc_fetch"
+) -> dict[str, Any]:
+    result = await client.call_tool(tool, arguments)
     content: Any = result.structured_content
     assert isinstance(content, dict)
     text = result.content[0]
@@ -38,7 +40,7 @@ async def call(client: Client, arguments: dict[str, Any]) -> dict[str, Any]:
 async def test_lists_the_fetch_tool(tmp_path: Path, test_site: SiteServer) -> None:
     async with connect(tmp_path, test_site) as client:
         tools = (await client.list_tools()).tools
-    assert [tool.name for tool in tools] == ["pdc_fetch"]
+    assert [tool.name for tool in tools] == ["pdc_fetch", "pdc_query"]
     tool = tools[0]
     assert tool.annotations is not None and tool.annotations.read_only_hint is True
     assert tool.input_schema["required"] == ["url"]
@@ -89,3 +91,18 @@ async def test_invalid_arguments(tmp_path: Path, test_site: SiteServer) -> None:
         envelope = await call(client, {"url": "not a url"})
     assert envelope["error"]["code"] == "invalid_request"
     assert envelope["error"]["message"].startswith("url:")
+
+
+async def test_query_finds_fetched_pages(tmp_path: Path, test_site: SiteServer) -> None:
+    async with connect(tmp_path, test_site) as client:
+        empty = await call(client, {"query": "sourdough"}, tool="pdc_query")
+        await call(client, {"url": test_site.url("/article.html")})
+        found = await call(client, {"query": "sourdough", "limit": 5}, tool="pdc_query")
+        invalid = await call(client, {"query": "x", "limit": 0}, tool="pdc_query")
+
+    assert empty["data"]["hits"] == []
+    hits = found["data"]["hits"]
+    assert [hit["url"] for hit in hits] == [test_site.url("/article.html")]
+    assert hits[0]["title"] == "How we bake our sourdough"
+    assert "[sourdough]" in hits[0]["snippet"].lower()
+    assert invalid["error"]["code"] == "invalid_request"

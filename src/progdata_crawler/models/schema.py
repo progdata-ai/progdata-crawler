@@ -11,9 +11,13 @@ from progdata_crawler.models.fetch import FetchRequest
 from progdata_crawler.models.harvest import HarvestRequest
 from progdata_crawler.models.options import PageOptions, PathFilter, SelectorFilter
 from progdata_crawler.models.page import Image, Link, Page, PageMetadata
+from progdata_crawler.models.query import QueryHit, QueryRequest, QueryResult
 
 PUBLIC_MODELS: tuple[type[BaseModel], ...] = (
     FetchRequest,
+    QueryRequest,
+    QueryResult,
+    QueryHit,
     BulkRequest,
     HarvestRequest,
     PageOptions,

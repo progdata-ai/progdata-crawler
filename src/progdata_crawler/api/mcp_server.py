@@ -14,6 +14,8 @@ from pydantic import Field, ValidationError
 
 from progdata_crawler import __version__
 from progdata_crawler.core.crawler import Crawler
+from progdata_crawler.core.envelopes import enveloped
+from progdata_crawler.core.store.query import query_pages
 from progdata_crawler.models import (
     DEFAULT_OUTPUTS,
     ContentMode,
@@ -25,6 +27,8 @@ from progdata_crawler.models import (
     Meta,
     Output,
     Page,
+    QueryRequest,
+    QueryResult,
     RenderMode,
     Retention,
 )
@@ -42,6 +46,24 @@ FETCH_DESCRIPTION = (
     "markdown, plus metadata (title, description, language, status). Pages that need "
     "JavaScript are rendered in a browser automatically. Recent results come from a cache."
 )
+
+
+QUERY_DESCRIPTION = (
+    "Search the content of pages fetched before (cached), without fetching anything. "
+    "Every word must match. Returns URL, title and a snippet with the matches in [brackets], "
+    "best matches first. Use pdc_fetch to read a hit in full."
+)
+
+
+def _invalid[T](result_type: type[T], error: ValidationError) -> Envelope[T]:
+    first = error.errors()[0]
+    return Envelope[result_type](
+        meta=Meta(request_id="invalid", took_ms=0),
+        error=ErrorInfo(
+            code=ErrorCode.INVALID_REQUEST,
+            message=f"{'.'.join(str(p) for p in first['loc'])}: {first['msg']}",
+        ),
+    )
 
 
 def create_server(settings: Settings, *, store_path: str | None = None) -> MCPServer[None]:
@@ -132,14 +154,23 @@ def create_server(settings: Settings, *, store_path: str | None = None) -> MCPSe
         try:
             request = FetchRequest.model_validate(fields)
         except ValidationError as error:
-            first = error.errors()[0]
-            return Envelope[Page](
-                meta=Meta(request_id="invalid", took_ms=0),
-                error=ErrorInfo(
-                    code=ErrorCode.INVALID_REQUEST,
-                    message=f"{'.'.join(str(p) for p in first['loc'])}: {first['msg']}",
-                ),
-            )
+            return _invalid(Page, error)
         return await running["crawler"].fetch_envelope(request)
+
+    @server.tool(
+        name="pdc_query",
+        title="Search fetched pages",
+        description=QUERY_DESCRIPTION,
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
+    async def pdc_query(  # pyright: ignore[reportUnusedFunction]
+        query: Annotated[str, Field(description="Words to look for.")],
+        limit: Annotated[int, Field(description="Most hits to return (1-100).")] = 10,
+    ) -> Envelope[QueryResult]:
+        try:
+            request = QueryRequest(query=query, limit=limit)
+        except ValidationError as error:
+            return _invalid(QueryResult, error)
+        return await enveloped(QueryResult, query_pages(running["crawler"].store, request))
 
     return server
