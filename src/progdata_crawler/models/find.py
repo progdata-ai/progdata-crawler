@@ -66,3 +66,5 @@ class FindResult(BaseModel):
     query: str
     provider: str
     hits: tuple[SearchHit, ...]
+    notes: tuple[str, ...] = ()
+    """Why some requested sources gave no hits, for example sources the provider lacks."""

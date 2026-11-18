@@ -94,6 +94,7 @@ def _retry_after(response: httpx.Response) -> float | None:
 
 class BraveSearch:
     name = "brave"
+    sources = frozenset(SearchSource)
 
     def __init__(
         self,

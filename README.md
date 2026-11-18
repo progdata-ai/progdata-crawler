@@ -190,7 +190,7 @@ Set with environment variables, or in a `.env` file in the working directory.
 | `PDC_RETENTION_DAYS` | 7 | Cached pages and finished jobs older than this are deleted |
 | `PDC_MAX_CONCURRENT_JOBS` | 2 | Jobs (harvest, bulk) that run at the same time |
 | `PDC_BULK_CONCURRENCY` | 8 | Pages bulk jobs fetch at the same time, across all bulk jobs |
-| `PDC_SEARCH_PROVIDER` | `brave` | The search provider for find |
+| `PDC_SEARCH_PROVIDER` | `brave` | The search provider for find: `brave` (the web) or `local` (pages already fetched) |
 | `PDC_BRAVE_API_KEY` | unset | Key for the [Brave Search API](https://brave.com/search/api/), the default search provider |
 | `PDC_WEBHOOK_SECRET` | unset | Key that signs webhooks to `notify_url`. Jobs with a `notify_url` are refused while unset |
 | `PDC_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR` |
@@ -203,6 +203,18 @@ Logs go to stderr.
 Find searches the web through a search provider. The default is the [Brave Search API](https://brave.com/search/api/): set `PDC_BRAVE_API_KEY`.
 
 Calls to the search API follow the same rules as any other request: they are checked against the API host's robots.txt.
+
+### Local search, free and offline
+
+With `PDC_SEARCH_PROVIDER=local`, find searches the pages you have already fetched instead of the web. It needs no key and sends no requests:
+
+```bash
+export PDC_SEARCH_PROVIDER=local
+pdc harvest https://docs.python.org/3/library/ --max-pages 300
+pdc find "asyncio timeout"
+```
+
+Only pages you fetched can be found, and only as long as the retention settings keep them (`PDC_RETENTION_DAYS`). The local index holds web pages only: asking for `news` or `images` gives no hits and a note in `notes`. `time_range` filters on when a page was fetched. With `fetch`, hits come from the cache when it is fresh enough; otherwise they are fetched again, robots.txt included.
 
 ## Webhooks
 

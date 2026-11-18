@@ -10,6 +10,7 @@ from progdata_crawler.core.errors import CrawlerError
 from progdata_crawler.core.fetch.guard import AddressGuard
 from progdata_crawler.core.find import create_provider, search
 from progdata_crawler.core.find.brave import BraveSearch, plain_text
+from progdata_crawler.core.store.sqlite import PageStore
 from progdata_crawler.models import ErrorCode, FindRequest, SearchSource
 from progdata_crawler.settings import Settings, default_user_agent
 
@@ -194,9 +195,10 @@ async def test_without_a_key_nothing_is_sent() -> None:
 
 async def test_provider_comes_from_settings(tmp_path: Path) -> None:
     settings = Settings(data_dir=tmp_path, brave_api_key="k")  # pyright: ignore[reportArgumentType]
-    provider = create_provider(settings, Robots())
-    assert provider.name == "brave"
-    await provider.aclose()
+    async with PageStore(":memory:") as store:
+        provider = create_provider(settings, robots=Robots(), store=store)
+        assert provider.name == "brave"
+        await provider.aclose()
 
 
 def test_plain_text() -> None:

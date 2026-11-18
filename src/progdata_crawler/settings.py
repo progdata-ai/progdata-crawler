@@ -40,6 +40,8 @@ class LogFormat(StrEnum):
 class SearchProviderName(StrEnum):
     BRAVE = "brave"
     """The Brave Search API. Needs `PDC_BRAVE_API_KEY`."""
+    LOCAL = "local"
+    """Pages already fetched, through the full-text index. Free, offline, no key."""
 
 
 class Settings(BaseSettings):

@@ -497,7 +497,7 @@ def find_command(
 
 async def _find(settings: Settings, request: FindRequest) -> Envelope[FindResult]:
     async with Crawler(settings) as crawler:
-        provider = create_provider(settings, crawler.check_robots)
+        provider = create_provider(settings, robots=crawler.check_robots, store=crawler.store)
         try:
             return await enveloped(FindResult, find(crawler, provider, request))
         finally:
