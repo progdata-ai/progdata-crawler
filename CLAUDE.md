@@ -6,6 +6,7 @@ A Python 3.12 service that fetches, crawls, searches and structures web content 
 
 ```bash
 uv sync                # install dependencies into .venv
+uv run playwright install chromium   # once, for the browser tests
 uv run pytest          # tests
 uv run ruff check      # lint
 uv run ruff format     # format
@@ -40,6 +41,8 @@ Pin third-party GitHub Actions to a full commit SHA, with the version in a comme
 - **Errors.** The core raises `progdata_crawler.core.errors.CrawlerError` with an `ErrorCode` for every expected failure. Entry points turn it into their own format. `tests/test_architecture.py` fails if the core imports from `api/` or from CLI, REST or MCP frameworks.
 
 ## Testing
+
+Browser tests need Chromium. Install it with `uv run playwright install chromium`, or point `PDC_BROWSER_EXECUTABLE` at an existing Chromium binary.
 
 Tests that need a website use the `test_site` fixture: a local site on 127.0.0.1 (see `tests/support/site_server.py`). It serves static pages from `tests/support/site/` (an article with boilerplate around it, a JS-only page, a docs section, a page disallowed by robots.txt) and generated routes: `/robots.txt`, `/sitemap.xml`, `/slow?ms=N`, `/status/<code>` (with `Retry-After` on 429 and 503), `/redirect?to=<path>`, `/echo/headers` and `/files/sample.pdf`.
 

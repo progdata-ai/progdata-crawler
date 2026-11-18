@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     robots_allowlist: tuple[str, ...] = ()
     """Domains where robots.txt is not applied: our own sites and sites that have given
     us permission. Subdomains are included. Set as JSON, e.g. `["progdata.no"]`."""
+    browser_executable: Path | None = None
+    """Chromium to use instead of the one Playwright installs. Leave unset normally."""
+    browser_max_pages: int = Field(default=4, ge=1, le=32)
+    """Pages the browser may render at the same time."""
     log_level: LogLevel = LogLevel.INFO
     log_format: LogFormat = LogFormat.TEXT
 
