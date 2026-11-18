@@ -10,6 +10,8 @@ Static pages live in `tests/support/site/`. A few routes are generated on the fl
 - `/redirect?to=<path>`: 302 redirect to another path on the site.
 - `/echo/headers`: the request headers as JSON, to check what a client sends.
 - `/files/sample.pdf`: a small, valid PDF with one line of text.
+- `/manual/...`: a generated documentation site of 100 pages (see `manual_site.py`),
+  with `/manual/sitemap.xml`, and the pages outside it that it links to.
 
 POST requests (webhooks) are recorded in `SiteServer.received` and answered with the
 route added for that path, or 200.
@@ -28,6 +30,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, ClassVar, override
 from urllib.parse import parse_qs, urlsplit
+
+from tests.support.manual_site import manual_page, manual_sitemap, outside_page
 
 STATIC_DIR = Path(__file__).parent / "site"
 
@@ -183,6 +187,11 @@ class _Handler(BaseHTTPRequestHandler):
             return Response(body.encode(), content_type="application/json")
         if path == "/files/sample.pdf":
             return Response(build_pdf(), content_type="application/pdf")
+        if path == "/manual/sitemap.xml":
+            return Response(manual_sitemap(self.site.base_url), content_type="application/xml")
+        generated = manual_page(path) or outside_page(path)
+        if generated is not None:
+            return Response(generated)
         return self._static(path)
 
     def _robots(self) -> Response:
