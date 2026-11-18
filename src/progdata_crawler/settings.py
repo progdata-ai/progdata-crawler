@@ -9,7 +9,7 @@ from enum import StrEnum
 from functools import cache
 from pathlib import Path
 
-from pydantic import Field, computed_field
+from pydantic import Field, SecretStr, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from progdata_crawler import __version__
@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     bulk_concurrency: int = Field(default=8, ge=1, le=64)
     """Pages that bulk jobs fetch at the same time, across all bulk jobs. The per-domain
     rate limit still spaces out requests to the same site."""
+    webhook_secret: SecretStr | None = None
+    """Key for signing webhooks to `notify_url`. Jobs with a `notify_url` are refused
+    while it is unset."""
     log_level: LogLevel = LogLevel.INFO
     log_format: LogFormat = LogFormat.TEXT
 

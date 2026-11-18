@@ -22,3 +22,5 @@ class HarvestRequest(PageOptions):
     scope: Scope = Scope.SITE
     sitemaps: bool = True
     """Also start from the URLs in the site's sitemaps, as if linked from the start page."""
+    notify_url: HttpUrl | None = None
+    """Receives a signed POST when the job starts and when it finishes."""

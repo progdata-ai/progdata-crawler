@@ -11,6 +11,9 @@ Static pages live in `tests/support/site/`. A few routes are generated on the fl
 - `/echo/headers`: the request headers as JSON, to check what a client sends.
 - `/files/sample.pdf`: a small, valid PDF with one line of text.
 
+POST requests (webhooks) are recorded in `SiteServer.received` and answered with the
+route added for that path, or 200.
+
 Tests can add their own routes with `SiteServer.add`.
 """
 
@@ -77,6 +80,15 @@ def build_pdf(text: str = PDF_TEXT) -> bytes:
 
 
 @dataclass(frozen=True)
+class Received:
+    """A POST request the test site received."""
+
+    path: str
+    headers: dict[str, str]
+    body: bytes
+
+
+@dataclass(frozen=True)
 class Response:
     body: bytes
     status: int = 200
@@ -93,6 +105,7 @@ class SiteServer:
         self.base_url = f"http://{host!s}:{port}"
         self._routes: dict[str, Response] = {}
         self._lock = threading.Lock()
+        self.received: list[Received] = []
 
     def url(self, path: str = "/") -> str:
         return self.base_url + (path if path.startswith("/") else "/" + path)
@@ -116,6 +129,7 @@ class SiteServer:
         """Remove the routes added with `add`."""
         with self._lock:
             self._routes.clear()
+            self.received.clear()
 
     def custom_route(self, path: str) -> Response | None:
         with self._lock:
@@ -135,6 +149,15 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_HEAD(self) -> None:
         self._send(self._route(), include_body=False)
+
+    def do_POST(self) -> None:
+        length = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(length)
+        path = urlsplit(self.path).path
+        headers = {key.lower(): value for key, value in self.headers.items()}
+        with self.site._lock:  # pyright: ignore[reportPrivateUsage]
+            self.site.received.append(Received(path, headers, body))
+        self._send(self.site.custom_route(path) or Response(b"ok", content_type="text/plain"))
 
     def _route(self) -> Response:
         parts = urlsplit(self.path)

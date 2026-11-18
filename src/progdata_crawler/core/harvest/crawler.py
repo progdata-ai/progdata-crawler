@@ -59,7 +59,16 @@ class _Frontier:
         return level
 
 
-_REQUEST_ONLY = {"url", "max_pages", "max_depth", "paths", "scope", "sitemaps", "outputs"}
+_REQUEST_ONLY = {
+    "url",
+    "max_pages",
+    "max_depth",
+    "paths",
+    "scope",
+    "sitemaps",
+    "outputs",
+    "notify_url",
+}
 
 
 async def harvest(crawler: Crawler, request: HarvestRequest, ctx: JobContext) -> None:
