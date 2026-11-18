@@ -1,3 +1,4 @@
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -10,6 +11,13 @@ from progdata_crawler.api.cli import app
 
 runner = CliRunner()
 
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(text: str) -> str:
+    """Remove color codes. Help output is colored when CI forces a terminal."""
+    return ANSI_ESCAPE.sub("", text)
+
 
 def test_version() -> None:
     result = runner.invoke(app, ["--version"])
@@ -19,8 +27,9 @@ def test_version() -> None:
 
 def test_no_arguments_shows_help() -> None:
     result = runner.invoke(app, [])
-    assert "Usage:" in result.output
-    assert "--version" in result.output
+    output = _plain(result.output)
+    assert "Usage:" in output
+    assert "--version" in output
 
 
 @pytest.mark.parametrize("command", ["progdata-crawler", "pdc"])
