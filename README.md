@@ -311,17 +311,7 @@ pdc watch run              # keep checking as watches fall due
 pdc watch remove <id>      # stop, and delete the kept versions
 ```
 
-`serve` and `mcp` check due watches while they run. A change is sent to `notify_url` as a signed webhook (`watch.changed`, see Webhooks) with a unified diff. Every check is a fresh fetch through the usual robots.txt and rate-limit rules, and stores the page, so local search (`PDC_SEARCH_PROVIDER=local`, `pdc query`) stays current for the pages you watch.
-## Research
-
-`pdc research`, `POST /v1/research` and `pdc_research` answer a question from the web:
-
-1. The LLM writes a few search queries.
-2. The search provider runs them, and the best hits are fetched under the usual rules.
-3. The LLM answers from those pages only, citing them as `[n]`.
-4. Another round searches for anything still missing.
-
-Every source in the result was fetched and read; citations of anything else are removed and noted. `max_rounds`, `max_searches`, `max_pages` and `max_seconds` bound the work. With `PDC_SEARCH_PROVIDER=local` and Ollama it costs nothing, but it can only use pages you have fetched before.
+`serve` and `mcp` check due watches while they run. Versions older than `PDC_RETENTION_DAYS` are deleted automatically, except the newest of each watch, and removing a watch deletes all of its versions. A change is sent to `notify_url` as a signed webhook (`watch.changed`, see Webhooks) with a unified diff. Every check is a fresh fetch through the usual robots.txt and rate-limit rules, and stores the page, so local search (`PDC_SEARCH_PROVIDER=local`, `pdc query`) stays current for the pages you watch.
 
 ## Webhooks
 

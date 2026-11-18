@@ -30,6 +30,9 @@ from progdata_crawler.models.watch import CheckStatus, Watch, WatchCheck, WatchC
 
 log = logging.getLogger(__name__)
 
+CLEANUP_INTERVAL_S = 60 * 60
+"""How often the scheduler deletes old versions."""
+
 IDLE_SLEEP_S = 60.0
 """Longest the scheduler sleeps between looks at the table (new watches are seen then)."""
 
@@ -57,6 +60,8 @@ class WatchService:
         self._loop: asyncio.Task[None] | None = None
         self._wake = asyncio.Event()
         self._checking: set[str] = set()
+        self._max_age_s = crawler.settings.retention_days * 24 * 60 * 60
+        self._last_cleanup: float | None = None
 
     @property
     def store(self) -> WatchStore:
@@ -189,10 +194,25 @@ class WatchService:
             )
         return check
 
+    async def cleanup(self) -> int:
+        """Delete versions older than `PDC_RETENTION_DAYS` (keeping each watch's newest).
+        Returns versions deleted. Removing a watch deletes all its versions at once."""
+        deleted = await asyncio.to_thread(self._store.delete_versions_older_than, self._max_age_s)
+        self._last_cleanup = self._clock()
+        log.info(
+            "watch retention cleanup",
+            extra={"versions_deleted": deleted, "max_age_days": self._max_age_s / 86_400},
+        )
+        return deleted
+
     async def _run(self) -> None:
         while True:
             try:
                 await self.check_due()
+                if self._last_cleanup is None or (
+                    self._clock() - self._last_cleanup >= CLEANUP_INTERVAL_S
+                ):
+                    await self.cleanup()
             except Exception:
                 log.exception("watch scheduler failed")
             next_due = await asyncio.to_thread(self._store.next_due_at)

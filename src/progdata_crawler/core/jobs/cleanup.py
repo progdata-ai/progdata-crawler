@@ -34,8 +34,14 @@ class RetentionCleaner:
         """Delete old data now. Returns (jobs deleted, cached pages deleted)."""
         jobs = await asyncio.to_thread(self._jobs.delete_older_than, self._max_age_s)
         pages = await self._pages.delete_older_than(self._max_age_s)
-        if jobs or pages:
-            log.info("retention cleanup", extra={"jobs_deleted": jobs, "pages_deleted": pages})
+        log.info(
+            "retention cleanup",
+            extra={
+                "jobs_deleted": jobs,
+                "pages_deleted": pages,
+                "max_age_days": self._max_age_s / DAY_S,
+            },
+        )
         return jobs, pages
 
     def start(self) -> None:
