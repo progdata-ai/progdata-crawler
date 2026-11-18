@@ -64,6 +64,7 @@ src/progdata_crawler/
   core/
     crawler.py  Crawler: one request through cache, robots, rate limit, fetch, extract
     errors.py   CrawlerError
+    urls.py     URL normalization and deduplication
     fetch/      HTTP and browser fetching, JS detection, browser steps
     polite/     robots.txt and per-domain rate limiting
     extract/    markdown, links, metadata, images, summaries
