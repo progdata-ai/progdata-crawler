@@ -9,6 +9,7 @@ from progdata_crawler.models.discover import (
 )
 from progdata_crawler.models.envelope import Envelope, ErrorCode, ErrorInfo, Meta
 from progdata_crawler.models.fetch import FetchRequest
+from progdata_crawler.models.harvest import HarvestRequest
 from progdata_crawler.models.jobs import (
     Job,
     JobKind,
@@ -46,6 +47,7 @@ __all__ = [
     "ErrorCode",
     "ErrorInfo",
     "FetchRequest",
+    "HarvestRequest",
     "Image",
     "Job",
     "JobKind",

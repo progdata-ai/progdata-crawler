@@ -8,12 +8,14 @@ from progdata_crawler.models.bulk import BulkRequest
 from progdata_crawler.models.discover import DiscoveredUrl, DiscoverRequest, DiscoverResult
 from progdata_crawler.models.envelope import ErrorInfo, Meta
 from progdata_crawler.models.fetch import FetchRequest
+from progdata_crawler.models.harvest import HarvestRequest
 from progdata_crawler.models.options import PageOptions, PathFilter, SelectorFilter
 from progdata_crawler.models.page import Image, Link, Page, PageMetadata
 
 PUBLIC_MODELS: tuple[type[BaseModel], ...] = (
     FetchRequest,
     BulkRequest,
+    HarvestRequest,
     PageOptions,
     SelectorFilter,
     PathFilter,
