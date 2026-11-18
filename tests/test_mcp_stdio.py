@@ -54,6 +54,7 @@ async def test_pdc_fetch_over_stdio(tmp_path: Path, test_site: SiteServer) -> No
         "pdc_session",
         "pdc_discover",
         "pdc_harvest",
+        "pdc_structure",
         "pdc_bulk",
         "pdc_job",
     ]

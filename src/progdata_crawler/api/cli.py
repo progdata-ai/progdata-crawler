@@ -1,6 +1,7 @@
 """Command-line interface: `progdata-crawler`, also installed as `pdc`."""
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 from typing import Annotated, Any
@@ -24,6 +25,7 @@ from progdata_crawler.core.jobs.handlers import job_handlers
 from progdata_crawler.core.jobs.manager import JobManager
 from progdata_crawler.core.store.query import query_pages
 from progdata_crawler.core.structure.llm import LlmAnswer, create_llm
+from progdata_crawler.core.structure.service import structure
 from progdata_crawler.log import configure_logging
 from progdata_crawler.models import (
     BulkRequest,
@@ -52,6 +54,7 @@ from progdata_crawler.models import (
     SearchSource,
     TimeRange,
 )
+from progdata_crawler.models.structure_request import StructureRequest, StructureResult
 from progdata_crawler.settings import Settings, get_settings
 
 app = typer.Typer(
@@ -119,6 +122,14 @@ def fetch(
     no_store: Annotated[
         bool, typer.Option("--no-store", help="Store nothing after the response (retain=none).")
     ] = False,
+    steps: Annotated[
+        Path | None,
+        typer.Option(help="JSON file with browser steps to run after load (a list)."),
+    ] = None,
+    structure: Annotated[
+        Path | None,
+        typer.Option(help='JSON file with {"schema": ..., "instruction": ...} for -o structured.'),
+    ] = None,
     as_json: Annotated[
         bool, typer.Option("--json", help="Print the full response envelope as JSON.")
     ] = False,
@@ -140,6 +151,10 @@ def fetch(
     }
     if output:
         fields["outputs"] = output
+    if steps is not None:
+        fields["steps"] = _read_json(steps)
+    if structure is not None:
+        fields["structure"] = _read_json(structure)
     if timeout_ms is not None:
         fields["timeout_ms"] = timeout_ms
     if cache_ttl is not None:
@@ -333,6 +348,11 @@ def harvest(
     sitemaps: Annotated[
         bool, typer.Option("--sitemaps/--no-sitemaps", help="Also start from the sitemaps.")
     ] = True,
+    goal: Annotated[
+        str | None,
+        typer.Option(help="What you are looking for; the LLM ranks links to fetch the best first."),
+    ] = None,
+    goal_budget: Annotated[int, typer.Option(help="Most LLM calls for ranking links.")] = 10,
     output: OutputOption = None,
     content: Annotated[ContentMode, typer.Option(help="Main content or whole page.")] = (
         ContentMode.MAIN
@@ -343,7 +363,7 @@ def harvest(
     ] = False,
     as_json: JsonLinesOption = False,
 ) -> None:
-    """Crawl a site breadth first, printing each page as it finishes."""
+    """Crawl a site (breadth first, or guided by --goal), printing each page as it finishes."""
     settings = get_settings()
     configure_logging(settings.log_level, settings.log_format)
     try:
@@ -355,12 +375,61 @@ def harvest(
                 "paths": {"include": include_path or [], "exclude": exclude_path or []},
                 "scope": scope,
                 "sitemaps": sitemaps,
+                "goal": goal,
+                "goal_budget": goal_budget,
                 **_page_options(output, content, render, no_store),
             }
         )
     except ValidationError as error:
         raise _invalid_options(error) from error
     _finish(asyncio.run(_run_job(_local(settings), JobKind.HARVEST, request, as_json=as_json)))
+
+
+def _read_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        typer.echo(f"Cannot read {path}: {error}", err=True)
+        raise typer.Exit(2) from error
+
+
+@app.command(name="structure")
+def structure_command(
+    urls: Annotated[list[str], typer.Argument(help="The pages to extract from.")],
+    schema: Annotated[Path, typer.Option(help="JSON file with the JSON Schema of the result.")],
+    instruction: Annotated[str, typer.Option(help="What to extract, in plain words.")] = "",
+    render: Annotated[RenderMode, typer.Option(help="When to use a browser.")] = RenderMode.AUTO,
+) -> None:
+    """Extract data that fits a JSON Schema from pages, with the LLM. Prints JSON: the data
+    for one URL, or one line per page for several."""
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_format)
+    fields: dict[str, Any] = {
+        "structure": {"schema": _read_json(schema), "instruction": instruction},
+        "outputs": [Output.STRUCTURED],
+        "render": render,
+    }
+    try:
+        request = StructureRequest.model_validate({**fields, "urls": urls})
+    except ValidationError as error:
+        raise _invalid_options(error) from error
+    if len(urls) == 1:
+        envelope = asyncio.run(_structure_one(_local(settings), request))
+        if envelope.error is not None:
+            typer.echo(f"Error ({envelope.error.code.value}): {envelope.error.message}", err=True)
+            raise typer.Exit(1)
+        assert envelope.data is not None
+        typer.echo(json.dumps(envelope.data.data, indent=2, ensure_ascii=False))
+        return
+    bulk_request = BulkRequest.model_validate({**fields, "urls": urls})
+    _finish(asyncio.run(_run_job(_local(settings), JobKind.BULK, bulk_request, as_json=True)))
+
+
+async def _structure_one(
+    settings: Settings, request: StructureRequest
+) -> Envelope[StructureResult]:
+    async with Crawler(settings) as crawler:
+        return await enveloped(StructureResult, structure(crawler, None, request))
 
 
 @app.command()
