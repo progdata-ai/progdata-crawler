@@ -15,6 +15,7 @@ Tests can add their own routes with `SiteServer.add`.
 """
 
 import json
+import sys
 import threading
 import time
 from collections.abc import Generator
@@ -211,10 +212,20 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.write(response.body)
 
 
+class _QuietServer(ThreadingHTTPServer):
+    """Ignores clients that hang up early, as tests of size and time limits do."""
+
+    @override
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        if isinstance(sys.exc_info()[1], ConnectionError):
+            return
+        super().handle_error(request, client_address)
+
+
 @contextmanager
 def run_site() -> Generator[SiteServer]:
     """Start the test site on a free port on 127.0.0.1 and stop it afterwards."""
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    server = _QuietServer(("127.0.0.1", 0), _Handler)
     server.daemon_threads = True
     site = SiteServer(server)
     handler = type("SiteHandler", (_Handler,), {"site": site})

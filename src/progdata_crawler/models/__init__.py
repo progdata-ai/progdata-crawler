@@ -14,6 +14,7 @@ from progdata_crawler.models.options import (
     Retention,
     SelectorFilter,
 )
+from progdata_crawler.models.page import Image, Link, Page, PageMetadata
 from progdata_crawler.models.schema import json_schemas
 
 __all__ = [
@@ -25,8 +26,12 @@ __all__ = [
     "ErrorCode",
     "ErrorInfo",
     "FetchRequest",
+    "Image",
+    "Link",
     "Meta",
     "Output",
+    "Page",
+    "PageMetadata",
     "PageOptions",
     "PathFilter",
     "RenderMode",
