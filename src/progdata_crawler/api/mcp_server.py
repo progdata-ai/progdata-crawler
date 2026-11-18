@@ -14,16 +14,25 @@ from pydantic import Field, ValidationError
 
 from progdata_crawler import __version__
 from progdata_crawler.core.crawler import Crawler
+from progdata_crawler.core.discover import discover_envelope
 from progdata_crawler.core.envelopes import enveloped
+from progdata_crawler.core.jobs.handlers import job_handlers
+from progdata_crawler.core.jobs.manager import JobManager
 from progdata_crawler.core.store.query import query_pages
 from progdata_crawler.models import (
     DEFAULT_OUTPUTS,
+    BulkRequest,
     ContentMode,
     Device,
+    DiscoverRequest,
+    DiscoverResult,
     Envelope,
     ErrorCode,
     ErrorInfo,
     FetchRequest,
+    HarvestRequest,
+    JobKind,
+    JobView,
     Meta,
     Output,
     Page,
@@ -31,7 +40,9 @@ from progdata_crawler.models import (
     QueryResult,
     RenderMode,
     Retention,
+    Scope,
 )
+from progdata_crawler.models.jobs import MAX_JOB_WAIT_S
 from progdata_crawler.settings import Settings
 
 INSTRUCTIONS = (
@@ -55,6 +66,59 @@ QUERY_DESCRIPTION = (
 )
 
 
+DISCOVER_DESCRIPTION = (
+    "List the URLs of a site from its sitemaps and the links on its start page, without "
+    "fetching every page. Filter with `query` (words in the URL or link text), path "
+    "regexes and `scope`. Use it to find the pages worth fetching."
+)
+
+HARVEST_DESCRIPTION = (
+    "Crawl a site breadth first from `url`, within `max_pages` and `max_depth`, and return "
+    "each page with the requested outputs. Runs as a job: waits up to `wait_s` seconds and "
+    "returns the results when the job finished in time; otherwise returns the running job. "
+    "Then call pdc_job with its id and `next_cursor` until `complete` is true."
+)
+
+BULK_DESCRIPTION = (
+    "Fetch many URLs with the same options, in parallel. Runs as a job: waits up to "
+    "`wait_s` seconds and returns the results when the job finished in time; otherwise "
+    "returns the running job. Then call pdc_job with its id and `next_cursor`."
+)
+
+JOB_DESCRIPTION = (
+    "Status, progress and results of a harvest or bulk job, `limit` results after "
+    "`cursor`. Pass `next_cursor` back until `complete` is true. With cancel=true the job "
+    "is stopped first."
+)
+
+WaitS = Annotated[
+    float,
+    Field(
+        ge=0,
+        le=MAX_JOB_WAIT_S,
+        description="Seconds to wait for the job to finish before answering.",
+    ),
+]
+Outputs = Annotated[
+    tuple[Output, ...],
+    Field(description="What to return per page: markdown, html, raw_html, links, metadata …"),
+]
+Content = Annotated[
+    ContentMode, Field(description="'main' for the main content only, 'full' for all.")
+]
+Render = Annotated[RenderMode, Field(description="When to use a browser: auto, always, never.")]
+Retain = Annotated[Retention, Field(description="'none' stores nothing after the job is read.")]
+IncludePaths = Annotated[
+    list[str] | None, Field(description="Regexes; only URL paths matching one are kept.")
+]
+ExcludePaths = Annotated[
+    list[str] | None, Field(description="Regexes; URL paths matching one are left out.")
+]
+ScopeArg = Annotated[
+    Scope, Field(description="'site' (same host), 'subdomains' or 'external' (any host).")
+]
+
+
 def _invalid[T](result_type: type[T], error: ValidationError) -> Envelope[T]:
     first = error.errors()[0]
     return Envelope[result_type](
@@ -68,16 +132,26 @@ def _invalid[T](result_type: type[T], error: ValidationError) -> Envelope[T]:
 
 def create_server(settings: Settings, *, store_path: str | None = None) -> MCPServer[None]:
     """Build the MCP server. The crawler starts with the server and stops with it."""
-    running: dict[str, Crawler] = {}
+    running: dict[str, Any] = {}
 
     @asynccontextmanager
     async def lifespan(_: MCPServer[None]) -> AsyncGenerator[None]:
-        async with Crawler(settings, store_path=store_path) as crawler:
+        async with (
+            Crawler(settings, store_path=store_path) as crawler,
+            JobManager(settings, job_handlers(crawler), page_store=crawler.store) as jobs,
+        ):
             running["crawler"] = crawler
+            running["jobs"] = jobs
             try:
                 yield None
             finally:
                 running.clear()
+
+    def crawler() -> Crawler:
+        return running["crawler"]
+
+    def jobs() -> JobManager:
+        return running["jobs"]
 
     server: MCPServer[None] = MCPServer(
         name="progdata-crawler",
@@ -155,7 +229,7 @@ def create_server(settings: Settings, *, store_path: str | None = None) -> MCPSe
             request = FetchRequest.model_validate(fields)
         except ValidationError as error:
             return _invalid(Page, error)
-        return await running["crawler"].fetch_envelope(request)
+        return await crawler().fetch_envelope(request)
 
     @server.tool(
         name="pdc_query",
@@ -171,6 +245,130 @@ def create_server(settings: Settings, *, store_path: str | None = None) -> MCPSe
             request = QueryRequest(query=query, limit=limit)
         except ValidationError as error:
             return _invalid(QueryResult, error)
-        return await enveloped(QueryResult, query_pages(running["crawler"].store, request))
+        return await enveloped(QueryResult, query_pages(crawler().store, request))
+
+    @server.tool(
+        name="pdc_discover",
+        title="List the URLs of a site",
+        description=DISCOVER_DESCRIPTION,
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+    )
+    async def pdc_discover(  # pyright: ignore[reportUnusedFunction]
+        url: Annotated[str, Field(description="The start page of the site.")],
+        query: Annotated[
+            str | None, Field(description="Keep URLs whose address or link text has every word.")
+        ] = None,
+        include_paths: IncludePaths = None,
+        exclude_paths: ExcludePaths = None,
+        scope: ScopeArg = Scope.SITE,
+        sitemaps: Annotated[bool, Field(description="Read the site's sitemaps.")] = True,
+        links: Annotated[bool, Field(description="Read the links on the start page.")] = True,
+        limit: Annotated[int, Field(description="Most URLs to return.")] = 1_000,
+    ) -> Envelope[DiscoverResult]:
+        try:
+            request = DiscoverRequest.model_validate(
+                {
+                    "url": url,
+                    "query": query,
+                    "paths": {"include": include_paths or [], "exclude": exclude_paths or []},
+                    "scope": scope,
+                    "sitemaps": sitemaps,
+                    "links": links,
+                    "limit": limit,
+                }
+            )
+        except ValidationError as error:
+            return _invalid(DiscoverResult, error)
+        return await discover_envelope(crawler(), request)
+
+    @server.tool(
+        name="pdc_harvest",
+        title="Crawl a site",
+        description=HARVEST_DESCRIPTION,
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+    )
+    async def pdc_harvest(  # pyright: ignore[reportUnusedFunction]
+        url: Annotated[str, Field(description="The start page.")],
+        max_pages: Annotated[int, Field(description="Most pages to fetch.")] = 20,
+        max_depth: Annotated[int, Field(description="Most links to follow from the start.")] = 2,
+        include_paths: IncludePaths = None,
+        exclude_paths: ExcludePaths = None,
+        scope: ScopeArg = Scope.SITE,
+        sitemaps: Annotated[bool, Field(description="Also start from the sitemaps.")] = True,
+        outputs: Outputs = DEFAULT_OUTPUTS,
+        content: Content = ContentMode.MAIN,
+        render: Render = RenderMode.AUTO,
+        retain: Retain = Retention.DEFAULT,
+        wait_s: WaitS = 30,
+        limit: Annotated[int, Field(description="Most results in this answer.")] = 100,
+    ) -> Envelope[JobView]:
+        try:
+            request = HarvestRequest.model_validate(
+                {
+                    "url": url,
+                    "max_pages": max_pages,
+                    "max_depth": max_depth,
+                    "paths": {"include": include_paths or [], "exclude": exclude_paths or []},
+                    "scope": scope,
+                    "sitemaps": sitemaps,
+                    "outputs": outputs,
+                    "content": content,
+                    "render": render,
+                    "retain": retain,
+                }
+            )
+        except ValidationError as error:
+            return _invalid(JobView, error)
+        operation = jobs().start_job(JobKind.HARVEST, request, wait_s=wait_s, limit=limit)
+        return await enveloped(JobView, operation)
+
+    @server.tool(
+        name="pdc_bulk",
+        title="Fetch many pages",
+        description=BULK_DESCRIPTION,
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+    )
+    async def pdc_bulk(  # pyright: ignore[reportUnusedFunction]
+        urls: Annotated[list[str], Field(description="The http(s) URLs to fetch.")],
+        outputs: Outputs = DEFAULT_OUTPUTS,
+        content: Content = ContentMode.MAIN,
+        render: Render = RenderMode.AUTO,
+        retain: Retain = Retention.DEFAULT,
+        wait_s: WaitS = 30,
+        limit: Annotated[int, Field(description="Most results in this answer.")] = 100,
+    ) -> Envelope[JobView]:
+        try:
+            request = BulkRequest.model_validate(
+                {
+                    "urls": urls,
+                    "outputs": outputs,
+                    "content": content,
+                    "render": render,
+                    "retain": retain,
+                }
+            )
+        except ValidationError as error:
+            return _invalid(JobView, error)
+        operation = jobs().start_job(JobKind.BULK, request, wait_s=wait_s, limit=limit)
+        return await enveloped(JobView, operation)
+
+    @server.tool(
+        name="pdc_job",
+        title="Follow a job",
+        description=JOB_DESCRIPTION,
+        annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
+    )
+    async def pdc_job(  # pyright: ignore[reportUnusedFunction]
+        job_id: Annotated[str, Field(description="The job id from pdc_harvest or pdc_bulk.")],
+        cursor: Annotated[int, Field(ge=0, description="Results after this seq.")] = 0,
+        limit: Annotated[int, Field(ge=1, le=1_000, description="Most results.")] = 100,
+        cancel: Annotated[bool, Field(description="Stop the job first.")] = False,
+    ) -> Envelope[JobView]:
+        async def view() -> JobView:
+            if cancel:
+                await jobs().cancel_job(job_id)
+            return await jobs().view(job_id, cursor=cursor, limit=limit)
+
+        return await enveloped(JobView, view())
 
     return server

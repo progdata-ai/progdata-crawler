@@ -46,7 +46,7 @@ async def test_pdc_fetch_over_stdio(tmp_path: Path, test_site: SiteServer) -> No
         static = await fetch(client, test_site.url("/article.html"))
         js_page = await fetch(client, test_site.url("/js-app.html"))
 
-    assert tools == ["pdc_fetch", "pdc_query"]
+    assert tools == ["pdc_fetch", "pdc_query", "pdc_discover", "pdc_harvest", "pdc_bulk", "pdc_job"]
 
     assert static["error"] is None
     assert static["meta"]["rendered"] is False

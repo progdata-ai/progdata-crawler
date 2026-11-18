@@ -34,7 +34,20 @@ If you already have Chromium installed, you can skip `playwright install` and se
 
 ## Use it from Claude (MCP)
 
-The MCP server gives Claude the `pdc_fetch` tool. Replace `/path/to/progdata-crawler` with the folder you cloned.
+The MCP server gives Claude these tools:
+
+| Tool | What it does |
+| --- | --- |
+| `pdc_fetch` | Fetch one page as markdown and other outputs |
+| `pdc_discover` | List a site's URLs from its sitemaps and start page |
+| `pdc_harvest` | Crawl a site within `max_pages` and `max_depth` (a job) |
+| `pdc_bulk` | Fetch many URLs in parallel (a job) |
+| `pdc_job` | Status and results of a job, page by page; can cancel it |
+| `pdc_query` | Search the content of pages fetched before |
+
+`pdc_harvest` and `pdc_bulk` wait up to `wait_s` seconds (default 30) and answer with the results when the job is done by then, so small jobs need no polling. Larger jobs come back running; Claude then follows them with `pdc_job`.
+
+Replace `/path/to/progdata-crawler` with the folder you cloned.
 
 **Claude Code:**
 
@@ -73,7 +86,16 @@ pdc fetch https://example.com/ -o screenshot --full-page --json
 pdc fetch https://example.com/ --no-store             # store nothing after the response
 ```
 
-Run `pdc fetch --help` for every option. Errors go to stderr with exit code 1.
+```bash
+pdc discover https://example.com/ --include-path '^/docs/'   # one URL per line
+pdc harvest https://example.com/docs/ --max-pages 50 --max-depth 2 --json   # JSON lines
+pdc bulk https://example.com/a https://example.com/b
+pdc bulk --file urls.txt -o markdown --json
+pdc job <id>                                          # a job's status and results
+pdc query sourdough starter                           # search pages fetched before
+```
+
+`harvest` and `bulk` run the job in the command and print each page as it finishes; the job id and a summary go to stderr. Run `pdc <command> --help` for every option. Errors go to stderr with exit code 1.
 
 ## REST API
 
@@ -86,6 +108,19 @@ curl -s http://127.0.0.1:8000/v1/fetch \
   -H 'Content-Type: application/json' \
   -d '{"url": "https://example.com/", "outputs": ["markdown", "links"]}'
 ```
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /v1/fetch` | Fetch one page |
+| `POST /v1/discover` | List a site's URLs |
+| `POST /v1/harvest?wait_s=` | Start a crawl job |
+| `POST /v1/bulk?wait_s=` | Start a job that fetches many URLs |
+| `GET /v1/jobs/{id}?cursor=&limit=` | Job status, progress and the results after `cursor` |
+| `GET /v1/jobs/{id}/events` | Live job events (Server-Sent Events), resumable with `Last-Event-ID` |
+| `DELETE /v1/jobs/{id}` | Cancel a job |
+| `POST /v1/query` | Search pages fetched before |
+
+Harvest and bulk answer with the job right away, or after up to `wait_s` seconds with its first results. Read all results by passing `next_cursor` back as `cursor` until `complete` is true.
 
 Every response has the same shape:
 
