@@ -114,3 +114,16 @@ def convert(html: str) -> str:
 )
 def test_converter(html: str, expected: str) -> None:
     assert convert(html) == expected
+
+
+def test_rendered_app_keeps_structure_and_drops_noscript() -> None:
+    html = (
+        "<html><body><div id=app><h1>Order bread</h1>"
+        "<p>Choose your loaf and pick it up tomorrow morning at the bakery by the fjord.</p>"
+        "<ul><li>Sourdough</li><li>Rye</li><li>Seeded</li></ul></div>"
+        "<noscript>This page needs JavaScript.</noscript></body></html>"
+    )
+    markdown = to_markdown(html, BASE)
+    assert markdown.startswith("# Order bread")
+    assert "- Sourdough\n- Rye\n- Seeded" in markdown
+    assert "needs JavaScript" not in markdown

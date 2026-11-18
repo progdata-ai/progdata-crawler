@@ -62,6 +62,8 @@ The core never imports from `api/`. The entry points are thin layers on top of i
 ```
 src/progdata_crawler/
   core/
+    crawler.py  Crawler: one request through cache, robots, rate limit, fetch, extract
+    errors.py   CrawlerError
     fetch/      HTTP and browser fetching, JS detection, browser steps
     polite/     robots.txt and per-domain rate limiting
     extract/    markdown, links, metadata, images, summaries

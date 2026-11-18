@@ -85,6 +85,14 @@ def _stripped_body(tree: LexborHTMLParser) -> LexborNode | None:
     return body
 
 
+def _lost_headings(markdown: str, scope: LexborNode | None) -> bool:
+    """True when the page has headings but the extracted markdown has none, a sign that
+    extraction fell back to plain text."""
+    if scope is None or not scope.css("h1, h2, h3"):
+        return False
+    return not any(line.startswith("#") for line in markdown.splitlines())
+
+
 def _extract_main(html: str, base_url: str) -> str | None:
     result = trafilatura.extract(
         html,
@@ -141,6 +149,8 @@ def to_markdown(
     """Convert a page to markdown. Relative links and images become absolute."""
     tags = tags or SelectorFilter()
     tree = LexborHTMLParser(html)
+    for node in tree.css("noscript, template"):
+        node.decompose()  # fallback content for browsers without JavaScript, not the page
     roots = _apply_tags(tree, tags)
 
     if tags.include or content is ContentMode.FULL:
@@ -152,7 +162,8 @@ def to_markdown(
     region = _semantic_region(tree)
     source = f"<html><body>{region.html}</body></html>" if region is not None else tree.html
     main = _extract_main(source or "", base_url)
-    if main and len(main) >= MIN_MAIN_CHARS:
+    scope = region if region is not None else tree.body
+    if main and len(main) >= MIN_MAIN_CHARS and not _lost_headings(main, scope):
         return _tidy(main)
     if region is None:
         region = _stripped_body(tree)
