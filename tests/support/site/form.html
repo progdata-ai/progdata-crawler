@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Order bread</title>
+</head>
+<body>
+  <main>
+    <h1>Order bread</h1>
+    <form action="/submit" method="post">
+      <label>Name <input id="name" name="name"></label>
+      <label>Loaves <input id="loaves" name="loaves" value="1"></label>
+      <button id="send" type="submit">Send order</button>
+    </form>
+    <button id="more" type="button">Show opening hours</button>
+    <p id="hours" hidden>Open every day from 7 to 15.</p>
+    <p><a id="staff" href="/private/staff.html">Staff pages</a></p>
+    <p><a id="article" href="/article.html">How we bake</a></p>
+  </main>
+  <script>
+    document.getElementById("more").addEventListener("click", function () {
+      setTimeout(function () { document.getElementById("hours").hidden = false; }, 200);
+    });
+  </script>
+</body>
+</html>

@@ -45,7 +45,7 @@ Pin third-party GitHub Actions to a full commit SHA, with the version in a comme
 
 Browser tests need Chromium. Install it with `uv run playwright install chromium`, or point `PDC_BROWSER_EXECUTABLE` at an existing Chromium binary.
 
-Tests that need a website use the `test_site` fixture: a local site on 127.0.0.1 (see `tests/support/site_server.py`). It serves static pages from `tests/support/site/` (an article with boilerplate around it, a JS-only page, a docs section, a page disallowed by robots.txt) and generated routes: `/robots.txt`, `/sitemap.xml`, `/slow?ms=N`, `/status/<code>` (with `Retry-After` on 429 and 503), `/redirect?to=<path>`, `/echo/headers` and `/files/sample.pdf`.
+Tests that need a website use the `test_site` fixture: a local site on 127.0.0.1 (see `tests/support/site_server.py`). It serves static pages from `tests/support/site/` (an article with boilerplate around it, a JS-only page, a docs section, a form for browser steps, a page disallowed by robots.txt) and generated routes: `/robots.txt`, `/sitemap.xml`, `/slow?ms=N`, `/status/<code>` (with `Retry-After` on 429 and 503), `/redirect?to=<path>`, `/echo/headers` and `/files/sample.pdf`.
 
 Add test-specific pages with `test_site.add(path, body)`. They are removed after each test. Test pages are written from scratch.
 

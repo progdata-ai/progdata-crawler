@@ -37,7 +37,7 @@ from progdata_crawler.core.extract.images import extract_images
 from progdata_crawler.core.extract.links import extract_links
 from progdata_crawler.core.extract.markdown import to_markdown
 from progdata_crawler.core.extract.meta import extract_metadata
-from progdata_crawler.core.fetch.browser import BrowserPool
+from progdata_crawler.core.fetch.browser import BrowserPool, RawCapture
 from progdata_crawler.core.fetch.detect import (
     check_render_options,
     should_render_after,
@@ -59,6 +59,7 @@ from progdata_crawler.models.envelope import Envelope, ErrorCode, ErrorInfo, Met
 from progdata_crawler.models.fetch import FetchRequest
 from progdata_crawler.models.options import Output, PageOptions
 from progdata_crawler.models.page import Page, PageMetadata
+from progdata_crawler.models.steps import Capture
 from progdata_crawler.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -87,6 +88,7 @@ class _Source:
     html: str
     rendered: bool
     screenshot: bytes | None = None
+    captures: tuple[RawCapture, ...] = ()
     is_document: bool = False
     """A PDF, DOCX or XLSX response rather than an HTML page."""
     document: ConvertResult | None = None
@@ -134,6 +136,27 @@ def build_page(source: _Source, options: PageOptions) -> Page:
             if Output.SCREENSHOT in wanted and source.screenshot is not None
             else None
         ),
+        captures=(
+            tuple(_capture(raw, options) for raw in source.captures) if options.steps else None
+        ),
+    )
+
+
+def _capture(raw: RawCapture, options: PageOptions) -> Capture:
+    wanted = set(options.outputs)
+    return Capture(
+        step=raw.step,
+        url=raw.url,
+        markdown=(
+            to_markdown(raw.html, raw.url, content=options.content, tags=options.tags)
+            if Output.MARKDOWN in wanted
+            else None
+        ),
+        screenshot=(
+            base64.b64encode(raw.screenshot).decode()
+            if Output.SCREENSHOT in wanted and raw.screenshot is not None
+            else None
+        ),
     )
 
 
@@ -168,6 +191,7 @@ class Crawler:
             max_pages=settings.browser_max_pages,
             executable_path=settings.browser_executable,
             guard=self._guard,
+            navigation_check=self._before_navigation,
         )
         self._robots = RobotsPolicy(self._http.fetch_robots)
         self._rate = DomainRateLimiter(min_interval_s=settings.rate_limit_interval_s)
@@ -201,13 +225,18 @@ class Crawler:
         _check_outputs(options)
         url = str(request.url)
 
-        cached = await self._cache.get(url, options)
-        if cached is not None:
-            return FetchOutcome(cached.page, cached=True, rendered=cached.rendered)
+        # Steps can change things on the site (a form sent), so their pages are never
+        # served from or stored in the cache.
+        cacheable = not options.steps
+        if cacheable:
+            cached = await self._cache.get(url, options)
+            if cached is not None:
+                return FetchOutcome(cached.page, cached=True, rendered=cached.rendered)
 
         source = await self._fetch_source(url, options)
         page = await asyncio.to_thread(build_page, source, options)
-        await self._cache.put(url, options, page, rendered=source.rendered)
+        if cacheable:
+            await self._cache.put(url, options, page, rendered=source.rendered)
         return FetchOutcome(page, cached=False, rendered=source.rendered)
 
     async def fetch_document(
@@ -242,6 +271,16 @@ class Crawler:
         """The robots.txt rules for the origin of `url`."""
         await self._guard.check_url(url)
         return await self._robots.rules_for(url)
+
+    async def _before_navigation(self, url: str) -> None:
+        """Every page the browser goes to on its own (a redirect, a link a step clicked,
+        a form a step sent) is checked against robots.txt and waits its turn."""
+        await self._robots.check(url)
+        await self._rate.acquire(
+            url,
+            crawl_delay=await self._robots.crawl_delay(url),
+            max_wait_s=self.settings.timeout_ms / 1000,
+        )
 
     async def _polite_wait(self, url: str, options: PageOptions) -> None:
         await self._guard.check_url(url)
@@ -331,6 +370,7 @@ class Crawler:
             locale=options.locale,
             screenshot=Output.SCREENSHOT in options.outputs,
             full_page=options.full_page_screenshot,
+            steps=options.steps,
         )
         self._raise_if_throttled(url, page.status, None)
         if page.status is not None and page.status in (401, 403, 451):
@@ -349,6 +389,7 @@ class Crawler:
             html=page.html,
             rendered=True,
             screenshot=page.screenshot,
+            captures=page.captures,
         )
 
     async def fetch_envelope(

@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from progdata_crawler.models.steps import Capture
+
 
 class _Model(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -55,3 +57,5 @@ class Page(_Model):
     metadata: PageMetadata | None = None
     screenshot: str | None = None
     """PNG, base64-encoded."""
+    captures: tuple[Capture, ...] | None = None
+    """The page at each `capture` step, when the request had steps."""
