@@ -162,6 +162,7 @@ The same options work in the CLI, the MCP tool and the REST API.
 | `fetch_timeout` | 504 | The page did not respond within `timeout_ms` |
 | `fetch_failed` | 502 | DNS failure, refused connection, broken TLS, too many redirects |
 | `unsupported_type` | 415 | Not an HTML page, or larger than 10 MB |
+| `search_unavailable` | 503 | Web search is not configured (no API key), or the search provider failed |
 | `not_found` | 404 | No job with this id, or it has been deleted |
 | `internal_error` | 500 | Something went wrong on our side |
 
@@ -181,6 +182,8 @@ Set with environment variables, or in a `.env` file in the working directory.
 | `PDC_RETENTION_DAYS` | 7 | Cached pages and finished jobs older than this are deleted |
 | `PDC_MAX_CONCURRENT_JOBS` | 2 | Jobs (harvest, bulk) that run at the same time |
 | `PDC_BULK_CONCURRENCY` | 8 | Pages bulk jobs fetch at the same time, across all bulk jobs |
+| `PDC_SEARCH_PROVIDER` | `brave` | The search provider for find |
+| `PDC_BRAVE_API_KEY` | unset | Key for the [Brave Search API](https://brave.com/search/api/), the default search provider |
 | `PDC_WEBHOOK_SECRET` | unset | Key that signs webhooks to `notify_url`. Jobs with a `notify_url` are refused while unset |
 | `PDC_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR` |
 | `PDC_LOG_FORMAT` | `text` | `text` or `json` (one object per line) |

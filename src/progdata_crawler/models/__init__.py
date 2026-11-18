@@ -9,6 +9,13 @@ from progdata_crawler.models.discover import (
 )
 from progdata_crawler.models.envelope import Envelope, ErrorCode, ErrorInfo, Meta
 from progdata_crawler.models.fetch import FetchRequest
+from progdata_crawler.models.find import (
+    FindRequest,
+    FindResult,
+    SearchHit,
+    SearchSource,
+    TimeRange,
+)
 from progdata_crawler.models.harvest import HarvestRequest
 from progdata_crawler.models.jobs import (
     Job,
@@ -50,6 +57,8 @@ __all__ = [
     "ErrorCode",
     "ErrorInfo",
     "FetchRequest",
+    "FindRequest",
+    "FindResult",
     "HarvestRequest",
     "Image",
     "Job",
@@ -73,7 +82,10 @@ __all__ = [
     "RenderMode",
     "Retention",
     "Scope",
+    "SearchHit",
+    "SearchSource",
     "SelectorFilter",
+    "TimeRange",
     "UrlSource",
     "json_schemas",
 ]

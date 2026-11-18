@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from progdata_crawler.core.errors import CrawlerError
-from progdata_crawler.core.fetch.guard import AddressGuard, GuardedTransport
+from progdata_crawler.core.fetch.guard import AddressGuard, guarded_client
 from progdata_crawler.models.jobs import Job, JobStatus
 
 log = logging.getLogger(__name__)
@@ -72,15 +72,12 @@ class WebhookNotifier:
         self._guard = guard
         self._retry_delays_s = tuple(retry_delays_s)
         self._deadline_s = deadline_s
-        guarded = not guard.allow_private
-        if transport is None and guarded:
-            transport = GuardedTransport(guard)
-        self._client = httpx.AsyncClient(
+        self._client = guarded_client(
+            guard,
+            user_agent=user_agent,
+            timeout_s=TIMEOUT_S,
             transport=transport,
-            trust_env=not guarded,
-            follow_redirects=False,
-            timeout=TIMEOUT_S,
-            headers={"User-Agent": user_agent, "Content-Type": "application/json"},
+            headers={"Content-Type": "application/json"},
         )
         self._tasks: set[asyncio.Task[bool]] = set()
 

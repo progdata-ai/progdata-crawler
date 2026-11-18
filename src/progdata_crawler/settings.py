@@ -37,6 +37,11 @@ class LogFormat(StrEnum):
     """One JSON object per line, for log collectors."""
 
 
+class SearchProviderName(StrEnum):
+    BRAVE = "brave"
+    """The Brave Search API. Needs `PDC_BRAVE_API_KEY`."""
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PDC_",
@@ -76,6 +81,10 @@ class Settings(BaseSettings):
     webhook_secret: SecretStr | None = None
     """Key for signing webhooks to `notify_url`. Jobs with a `notify_url` are refused
     while it is unset."""
+    search_provider: SearchProviderName = SearchProviderName.BRAVE
+    """Which search provider find uses."""
+    brave_api_key: SecretStr | None = None
+    """Key for the Brave Search API."""
     log_level: LogLevel = LogLevel.INFO
     log_format: LogFormat = LogFormat.TEXT
 
