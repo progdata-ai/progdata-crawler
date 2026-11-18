@@ -44,11 +44,15 @@ from progdata_crawler.models.options import (
 from progdata_crawler.models.page import Image, Link, Page, PageMetadata
 from progdata_crawler.models.query import QueryHit, QueryRequest, QueryResult
 from progdata_crawler.models.schema import json_schemas
+from progdata_crawler.models.session import SessionOpenRequest, SessionStepRequest, SessionView
+from progdata_crawler.models.steps import Capture, Step
+from progdata_crawler.models.structure import StructureSpec
 
 __all__ = [
     "DEFAULT_CACHE_TTL_SECONDS",
     "DEFAULT_OUTPUTS",
     "BulkRequest",
+    "Capture",
     "ContentMode",
     "ConvertRequest",
     "ConvertResult",
@@ -89,6 +93,11 @@ __all__ = [
     "SearchHit",
     "SearchSource",
     "SelectorFilter",
+    "SessionOpenRequest",
+    "SessionStepRequest",
+    "SessionView",
+    "Step",
+    "StructureSpec",
     "TimeRange",
     "UrlSource",
     "json_schemas",

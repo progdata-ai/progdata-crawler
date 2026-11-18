@@ -6,6 +6,7 @@ Start it with `progdata-crawler mcp` (stdio) or `progdata-crawler mcp --http`
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from enum import StrEnum
 from typing import Annotated, Any
 
 from mcp.server.mcpserver import MCPServer
@@ -20,6 +21,7 @@ from progdata_crawler.core.envelopes import enveloped
 from progdata_crawler.core.find import SearchProvider, create_provider, find
 from progdata_crawler.core.jobs.handlers import job_handlers
 from progdata_crawler.core.jobs.manager import JobManager
+from progdata_crawler.core.session.browser_session import SessionManager
 from progdata_crawler.core.store.query import query_pages
 from progdata_crawler.models import (
     DEFAULT_OUTPUTS,
@@ -47,6 +49,9 @@ from progdata_crawler.models import (
     Retention,
     Scope,
     SearchSource,
+    SessionOpenRequest,
+    SessionStepRequest,
+    SessionView,
     TimeRange,
 )
 from progdata_crawler.models.jobs import MAX_JOB_WAIT_S
@@ -149,6 +154,22 @@ CONVERT_DESCRIPTION = (
 )
 
 
+SESSION_DESCRIPTION = (
+    "Use a web page step by step in a browser session that stays open. "
+    "action='open' with a url opens it and returns the page and a session_id. "
+    "action='step' with session_id and steps runs them and returns the page afterwards. "
+    "Steps: click {selector}, type {selector, text}, press {key}, scroll {direction|selector}, "
+    "wait {selector|ms}, capture. action='close' closes the session. Sessions close by "
+    "themselves after a few minutes without use. robots.txt applies to every page."
+)
+
+
+class SessionAction(StrEnum):
+    OPEN = "open"
+    STEP = "step"
+    CLOSE = "close"
+
+
 def create_server(
     settings: Settings,
     *,
@@ -163,6 +184,7 @@ def create_server(
         async with (
             Crawler(settings, store_path=store_path) as crawler,
             JobManager(settings, job_handlers(crawler), page_store=crawler.store) as jobs,
+            SessionManager(crawler) as sessions,
         ):
             provider = search_provider or create_provider(
                 settings, robots=crawler.check_robots, store=crawler.store
@@ -170,6 +192,7 @@ def create_server(
             running["crawler"] = crawler
             running["jobs"] = jobs
             running["search"] = provider
+            running["sessions"] = sessions
             try:
                 yield None
             finally:
@@ -329,6 +352,42 @@ def create_server(
                 ),
             )
         return await enveloped(ConvertResult, convert_url(crawler(), url))
+
+    @server.tool(
+        name="pdc_session",
+        title="Browser session",
+        description=SESSION_DESCRIPTION,
+        annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True),
+    )
+    async def pdc_session(  # pyright: ignore[reportUnusedFunction]
+        action: Annotated[SessionAction, Field(description="open, step or close.")],
+        url: Annotated[str | None, Field(description="For open: the page to open.")] = None,
+        session_id: Annotated[
+            str | None, Field(description="For step and close: the session.")
+        ] = None,
+        steps: Annotated[
+            list[dict[str, Any]] | None,
+            Field(description='For open and step, e.g. [{"action": "click", "selector": "#go"}].'),
+        ] = None,
+        outputs: Outputs = DEFAULT_OUTPUTS,
+    ) -> Envelope[SessionView]:
+        sessions: SessionManager = running["sessions"]
+        try:
+            match action:
+                case SessionAction.OPEN:
+                    request = SessionOpenRequest.model_validate(
+                        {"url": url, "steps": steps or [], "outputs": outputs}
+                    )
+                    return await enveloped(SessionView, sessions.open(request))
+                case SessionAction.STEP:
+                    step_request = SessionStepRequest.model_validate({"steps": steps or []})
+                    return await enveloped(
+                        SessionView, sessions.step(session_id or "", step_request)
+                    )
+                case SessionAction.CLOSE:
+                    return await enveloped(SessionView, sessions.close(session_id or ""))
+        except ValidationError as error:
+            return _invalid(SessionView, error)
 
     @server.tool(
         name="pdc_discover",

@@ -87,6 +87,38 @@ def describe(step: Step) -> str:
 
 
 @dataclass(frozen=True)
+class BrowserSession:
+    """A browser context with one page, kept open between calls."""
+
+    context: BrowserContext
+    page: Page
+
+
+def _translate(exc: BaseException, url: str, timeout_ms: int) -> CrawlerError:
+    """A browser failure as the matching `CrawlerError`."""
+    if isinstance(exc, TimeoutError | PlaywrightTimeoutError):
+        return CrawlerError(
+            ErrorCode.FETCH_TIMEOUT, f"the page did not finish within {timeout_ms} ms", url=url
+        )
+    message = exc.message if isinstance(exc, PlaywrightError) else str(exc)
+    if "ERR_ACCESS_DENIED" in message:
+        return CrawlerError(
+            ErrorCode.ROBOTS_DISALLOWED, "robots.txt does not allow fetching this URL", url=url
+        )
+    if "ERR_BLOCKED_BY_CLIENT" in message:
+        return CrawlerError(
+            ErrorCode.ADDRESS_NOT_ALLOWED,
+            "requests to internal network addresses are not allowed",
+            url=url,
+        )
+    return CrawlerError(
+        ErrorCode.FETCH_FAILED,
+        f"the browser could not load the page: {message.splitlines()[0] if message else exc!r}",
+        url=url,
+    )
+
+
+@dataclass(frozen=True)
 class RenderedPage:
     url: str
     """The final URL, after redirects."""
@@ -175,6 +207,9 @@ class BrowserPool:
         idle = self._idle.get((device, locale))
         if idle:
             return idle.pop()
+        return await self._new_context(device, locale)
+
+    async def _new_context(self, device: Device, locale: str | None) -> BrowserContext:
         browser = await self._ensure_browser()
         profile = MOBILE if device is Device.MOBILE else DESKTOP
         user_agent = (
@@ -287,40 +322,74 @@ class BrowserPool:
                     )
             except TimeoutError as exc:
                 healthy = False
-                raise CrawlerError(
-                    ErrorCode.FETCH_TIMEOUT,
-                    f"the page did not finish loading within {timeout_ms} ms",
-                    url=url,
-                ) from exc
-            except PlaywrightTimeoutError as exc:
-                raise CrawlerError(
-                    ErrorCode.FETCH_TIMEOUT,
-                    f"the page did not finish loading within {timeout_ms} ms",
-                    url=url,
-                ) from exc
+                raise _translate(exc, url, timeout_ms) from exc
             except PlaywrightError as exc:
-                if "ERR_ACCESS_DENIED" in exc.message:
-                    raise CrawlerError(
-                        ErrorCode.ROBOTS_DISALLOWED,
-                        "robots.txt does not allow fetching this URL",
-                        url=url,
-                    ) from exc
-                if "ERR_BLOCKED_BY_CLIENT" in exc.message:
-                    raise CrawlerError(
-                        ErrorCode.ADDRESS_NOT_ALLOWED,
-                        "requests to internal network addresses are not allowed",
-                        url=url,
-                    ) from exc
-                raise CrawlerError(
-                    ErrorCode.FETCH_FAILED,
-                    f"the browser could not load the page: {exc.message.splitlines()[0]}",
-                    url=url,
-                ) from exc
+                raise _translate(exc, url, timeout_ms) from exc
             finally:
                 if healthy:
                     await self._return_context(context, device, locale)
                 else:
                     await context.close()
+
+    async def open_session(
+        self,
+        url: str,
+        *,
+        timeout_ms: int,
+        device: Device = Device.DESKTOP,
+        locale: str | None = None,
+        screenshot: bool = False,
+        full_page: bool = False,
+    ) -> tuple["BrowserSession", RenderedPage]:
+        """Open `url` in a context of its own that stays open for later steps. The caller
+        closes it with `close_session`. Raises like `render`."""
+        started = time.monotonic()
+        async with self._pages:
+            context = await self._new_context(device, locale)
+            page = await context.new_page()
+            session = BrowserSession(context, page)
+            try:
+                async with asyncio.timeout(timeout_ms / 1000):
+                    status, content_type = await self._open(page, url, HTML_TYPES)
+                    rendered = await self._snapshot(
+                        page, status, content_type, screenshot, full_page, started, ()
+                    )
+            except (TimeoutError, PlaywrightError) as exc:
+                await self.close_session(session)
+                raise _translate(exc, url, timeout_ms) from exc
+            except BaseException:
+                await self.close_session(session)
+                raise
+            return session, rendered
+
+    async def session_steps(
+        self,
+        session: "BrowserSession",
+        steps: tuple[Step, ...],
+        *,
+        timeout_ms: int,
+        screenshot: bool = False,
+        full_page: bool = False,
+    ) -> RenderedPage:
+        """Run steps in an open session and return the page as it is afterwards."""
+        started = time.monotonic()
+        page = session.page
+        async with self._pages:
+            try:
+                async with asyncio.timeout(timeout_ms / 1000):
+                    captures = await self._run_steps(page, steps, screenshot, full_page)
+                    return await self._snapshot(
+                        page, None, "text/html", screenshot, full_page, started, captures
+                    )
+            except (TimeoutError, PlaywrightError) as exc:
+                raise _translate(exc, page.url, timeout_ms) from exc
+
+    async def close_session(self, session: "BrowserSession") -> None:
+        """Close the session's context: its cookies and storage are gone with it."""
+        self._prechecked.pop(session.page, None)
+        self._refusals.pop(session.page, None)
+        with contextlib.suppress(PlaywrightError):
+            await session.context.close()
 
     async def _load(
         self,
@@ -334,45 +403,73 @@ class BrowserPool:
         steps: tuple[Step, ...] = (),
     ) -> RenderedPage:
         page = await context.new_page()
-        self._prechecked[page] = url
         try:
-            response = await page.goto(url, wait_until="load")
-            self._raise_refusal(page)
-            content_type = ""
-            if response is not None:
-                header = await response.header_value("content-type") or ""
-                content_type = header.split(";")[0].strip().lower()
-            if accept_types is not None and content_type and content_type not in accept_types:
-                raise CrawlerError(
-                    ErrorCode.UNSUPPORTED_TYPE,
-                    f"content type {content_type!r} is not supported",
-                    url=page.url,
-                    content_type=content_type,
-                )
-            # Pages that keep polling never go idle; what we have then is good enough.
-            with contextlib.suppress(PlaywrightTimeoutError):
-                await page.wait_for_load_state("networkidle", timeout=NETWORK_IDLE_WAIT_MS)
+            status, content_type = await self._open(page, url, accept_types)
             if wait_ms:
                 await page.wait_for_timeout(wait_ms)
-            captures: list[RawCapture] = []
-            for number, step in enumerate(steps, start=1):
-                capture = await self._run_step(page, number, step, screenshot, full_page)
-                if capture is not None:
-                    captures.append(capture)
-            image = await page.screenshot(full_page=full_page, type="png") if screenshot else None
-            return RenderedPage(
-                url=page.url,
-                status=response.status if response is not None else None,
-                html=await page.content(),
-                content_type=content_type or "text/html",
-                screenshot=image,
-                elapsed_ms=round((time.monotonic() - started) * 1000),
-                captures=tuple(captures),
+            captures = await self._run_steps(page, steps, screenshot, full_page)
+            return await self._snapshot(
+                page, status, content_type, screenshot, full_page, started, captures
             )
         finally:
             self._prechecked.pop(page, None)
             self._refusals.pop(page, None)
             await page.close()
+
+    async def _open(
+        self, page: Page, url: str, accept_types: Collection[str] | None
+    ) -> tuple[int | None, str]:
+        """Go to `url` (already checked by the crawler) and let it settle. Returns the
+        status and content type of the main document."""
+        self._prechecked[page] = url
+        response = await page.goto(url, wait_until="load")
+        self._raise_refusal(page)
+        content_type = ""
+        if response is not None:
+            header = await response.header_value("content-type") or ""
+            content_type = header.split(";")[0].strip().lower()
+        if accept_types is not None and content_type and content_type not in accept_types:
+            raise CrawlerError(
+                ErrorCode.UNSUPPORTED_TYPE,
+                f"content type {content_type!r} is not supported",
+                url=page.url,
+                content_type=content_type,
+            )
+        # Pages that keep polling never go idle; what we have then is good enough.
+        with contextlib.suppress(PlaywrightTimeoutError):
+            await page.wait_for_load_state("networkidle", timeout=NETWORK_IDLE_WAIT_MS)
+        return (response.status if response is not None else None), content_type or "text/html"
+
+    async def _run_steps(
+        self, page: Page, steps: tuple[Step, ...], screenshot: bool, full_page: bool
+    ) -> tuple[RawCapture, ...]:
+        captures: list[RawCapture] = []
+        for number, step in enumerate(steps, start=1):
+            capture = await self._run_step(page, number, step, screenshot, full_page)
+            if capture is not None:
+                captures.append(capture)
+        return tuple(captures)
+
+    async def _snapshot(
+        self,
+        page: Page,
+        status: int | None,
+        content_type: str,
+        screenshot: bool,
+        full_page: bool,
+        started: float,
+        captures: tuple[RawCapture, ...],
+    ) -> RenderedPage:
+        image = await page.screenshot(full_page=full_page, type="png") if screenshot else None
+        return RenderedPage(
+            url=page.url,
+            status=status,
+            html=await page.content(),
+            content_type=content_type,
+            screenshot=image,
+            elapsed_ms=round((time.monotonic() - started) * 1000),
+            captures=captures,
+        )
 
     def _raise_refusal(self, page: Page) -> None:
         """A navigation the checks refused shows up as a browser error page; raise the

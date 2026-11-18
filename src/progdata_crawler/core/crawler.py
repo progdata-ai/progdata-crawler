@@ -38,7 +38,12 @@ from progdata_crawler.core.extract.links import extract_links
 from progdata_crawler.core.extract.markdown import to_markdown
 from progdata_crawler.core.extract.meta import extract_metadata
 from progdata_crawler.core.extract.summary import summarize
-from progdata_crawler.core.fetch.browser import BrowserPool, RawCapture
+from progdata_crawler.core.fetch.browser import (
+    BrowserPool,
+    BrowserSession,
+    RawCapture,
+    RenderedPage,
+)
 from progdata_crawler.core.fetch.detect import (
     check_render_options,
     should_render_after,
@@ -447,6 +452,9 @@ class Crawler:
             full_page=options.full_page_screenshot,
             steps=options.steps,
         )
+        return await self._rendered_source(url, page)
+
+    async def _rendered_source(self, url: str, page: RenderedPage) -> _Source:
         self._raise_if_throttled(url, page.status, None)
         if page.status is not None and page.status in (401, 403, 451):
             raise CrawlerError(
@@ -466,6 +474,52 @@ class Crawler:
             screenshot=page.screenshot,
             captures=page.captures,
         )
+
+    async def open_session(self, url: str, options: PageOptions) -> tuple[BrowserSession, Page]:
+        """Open `url` in a browser session that stays open for later steps (see
+        `session_step`). The first load is checked like any fetch; `options.steps` run
+        right after it. Session pages are never cached. Close with `close_session`."""
+        _check_outputs(options)
+        await self._polite_wait(url, options)
+        session, rendered = await self._browser.open_session(
+            url,
+            timeout_ms=options.timeout_ms,
+            device=options.device,
+            locale=options.locale,
+            screenshot=Output.SCREENSHOT in options.outputs,
+            full_page=options.full_page_screenshot,
+        )
+        try:
+            source = await self._rendered_source(url, rendered)
+            if options.steps:
+                return session, await self.session_step(session, options)
+            return session, await self._session_page(source, options)
+        except BaseException:
+            await self._browser.close_session(session)
+            raise
+
+    async def session_step(self, session: BrowserSession, options: PageOptions) -> Page:
+        """Run `options.steps` in an open session and return the page afterwards."""
+        _check_outputs(options)
+        rendered = await self._browser.session_steps(
+            session,
+            options.steps,
+            timeout_ms=options.timeout_ms,
+            screenshot=Output.SCREENSHOT in options.outputs,
+            full_page=options.full_page_screenshot,
+        )
+        return await self._session_page(
+            await self._rendered_source(rendered.url, rendered), options
+        )
+
+    async def close_session(self, session: BrowserSession) -> None:
+        await self._browser.close_session(session)
+
+    async def _session_page(self, source: _Source, options: PageOptions) -> Page:
+        page = await asyncio.to_thread(build_page, source, options)
+        if Output.SUMMARY in options.outputs or Output.STRUCTURED in options.outputs:
+            page = await self._add_llm_outputs(page, source, options)
+        return page
 
     async def fetch_envelope(
         self, request: FetchRequest, *, request_id: str | None = None

@@ -164,3 +164,29 @@ def test_find_without_a_configured_provider(client: TestClient) -> None:
     response = client.post("/v1/find", json={"query": "baking"})
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "search_unavailable"
+
+
+def test_browser_session(client: TestClient, test_site: SiteServer) -> None:
+    test_site.add("/submit", "<html><body><h1>Thank you for your order</h1></body></html>")
+    opened = client.post("/v1/session", json={"url": test_site.url("/form.html")})
+    assert opened.status_code == 200
+    session_id = opened.json()["data"]["id"]
+    step = client.post(
+        f"/v1/session/{session_id}/step",
+        json={
+            "steps": [
+                {"action": "type", "selector": "#name", "text": "Ada"},
+                {"action": "click", "selector": "#send"},
+            ]
+        },
+    )
+    assert step.json()["data"]["page"]["markdown"].startswith("# Thank you for your order")
+    missing = client.post(
+        f"/v1/session/{session_id}/step",
+        json={"steps": [{"action": "click", "selector": "#none", "timeout_ms": 200}]},
+    )
+    assert missing.status_code == 422
+    assert missing.json()["error"]["code"] == "step_failed"
+    assert client.delete(f"/v1/session/{session_id}").json()["data"]["closed"] is True
+    gone = client.delete(f"/v1/session/{session_id}")
+    assert (gone.status_code, gone.json()["error"]["code"]) == (404, "not_found")
