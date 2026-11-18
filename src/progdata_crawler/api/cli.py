@@ -9,9 +9,15 @@ import typer
 from pydantic import ValidationError
 
 from progdata_crawler import __version__
+from progdata_crawler.core.convert.documents import (
+    MAX_DOCUMENT_BYTES,
+    convert_bytes,
+    convert_url,
+)
 from progdata_crawler.core.crawler import Crawler
 from progdata_crawler.core.discover import discover_envelope
 from progdata_crawler.core.envelopes import enveloped
+from progdata_crawler.core.find import create_provider, find
 from progdata_crawler.core.jobs.events import job_events
 from progdata_crawler.core.jobs.handlers import job_handlers
 from progdata_crawler.core.jobs.manager import JobManager
@@ -20,11 +26,14 @@ from progdata_crawler.log import configure_logging
 from progdata_crawler.models import (
     BulkRequest,
     ContentMode,
+    ConvertResult,
     Device,
     DiscoverRequest,
     DiscoverResult,
     Envelope,
     FetchRequest,
+    FindRequest,
+    FindResult,
     HarvestRequest,
     Job,
     JobKind,
@@ -38,6 +47,8 @@ from progdata_crawler.models import (
     RenderMode,
     Retention,
     Scope,
+    SearchSource,
+    TimeRange,
 )
 from progdata_crawler.settings import Settings, get_settings
 
@@ -426,6 +437,109 @@ async def _job_view(
             return await enveloped(JobView, jobs.view(job_id, cursor=cursor, limit=limit))
         finally:
             await jobs.aclose()
+
+
+@app.command(name="find")
+def find_command(
+    query: Annotated[str, typer.Argument(help="What to search for.")],
+    source: Annotated[
+        list[SearchSource] | None,
+        typer.Option("--source", "-s", help="web, news or images. Repeatable. Default: web."),
+    ] = None,
+    time_range: Annotated[
+        TimeRange | None, typer.Option(help="Only results from the last day/week/month/year.")
+    ] = None,
+    limit: Annotated[int, typer.Option(help="Most results per source.")] = 10,
+    country: Annotated[str | None, typer.Option(help="Country code, e.g. NO.")] = None,
+    language: Annotated[str | None, typer.Option(help="Language code, e.g. nb.")] = None,
+    fetch: Annotated[
+        bool, typer.Option("--fetch", help="Also fetch every web and news hit.")
+    ] = False,
+    output: OutputOption = None,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print the full response envelope as JSON.")
+    ] = False,
+) -> None:
+    """Search the web; with --fetch also fetch the hits."""
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_format)
+    try:
+        request = FindRequest.model_validate(
+            {
+                "query": query,
+                "sources": source or [SearchSource.WEB],
+                "time_range": time_range,
+                "limit": limit,
+                "country": country,
+                "language": language,
+                "fetch": {"outputs": output or [Output.MARKDOWN]} if fetch else None,
+            }
+        )
+    except ValidationError as error:
+        raise _invalid_options(error) from error
+
+    envelope = asyncio.run(_find(_local(settings), request))
+    if as_json:
+        typer.echo(envelope.model_dump_json(indent=2, exclude_none=True))
+    elif envelope.error is not None:
+        typer.echo(f"Error ({envelope.error.code.value}): {envelope.error.message}", err=True)
+    elif envelope.data is not None:
+        for hit in envelope.data.hits:
+            typer.echo(f"{hit.title}\n  {hit.url}" + (f"\n  {hit.snippet}" if hit.snippet else ""))
+            if hit.error is not None:
+                typer.echo(f"  ✗ {hit.error.code.value}: {hit.error.message}")
+            elif hit.page is not None and hit.page.markdown:
+                typer.echo("\n" + hit.page.markdown)
+            typer.echo("")
+    if envelope.error is not None:
+        raise typer.Exit(1)
+
+
+async def _find(settings: Settings, request: FindRequest) -> Envelope[FindResult]:
+    provider = create_provider(settings)
+    try:
+        async with Crawler(settings) as crawler:
+            return await enveloped(FindResult, find(crawler, provider, request))
+    finally:
+        await provider.aclose()
+
+
+@app.command()
+def convert(
+    target: Annotated[str, typer.Argument(help="A URL, or the path of a local file.")],
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print the full response envelope as JSON.")
+    ] = False,
+) -> None:
+    """Convert a PDF, DOCX or XLSX document (URL or local file) to markdown."""
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_format)
+    if not target.startswith(("http://", "https://")) and not Path(target).is_file():
+        typer.echo(f"No such file: {target}", err=True)
+        raise typer.Exit(2)
+    envelope = asyncio.run(_convert(_local(settings), target))
+    if as_json:
+        typer.echo(envelope.model_dump_json(indent=2, exclude_none=True))
+    elif envelope.error is not None:
+        typer.echo(f"Error ({envelope.error.code.value}): {envelope.error.message}", err=True)
+    elif envelope.data is not None:
+        typer.echo(envelope.data.markdown)
+    if envelope.error is not None:
+        raise typer.Exit(1)
+
+
+async def _convert(settings: Settings, target: str) -> Envelope[ConvertResult]:
+    if target.startswith(("http://", "https://")):
+        async with Crawler(settings) as crawler:
+            return await enveloped(ConvertResult, convert_url(crawler, target))
+    path = Path(target)
+    if path.stat().st_size > MAX_DOCUMENT_BYTES:
+        return await enveloped(
+            ConvertResult,
+            convert_bytes(b"\0" * (MAX_DOCUMENT_BYTES + 1), source=path.name),
+        )
+    content = await asyncio.to_thread(path.read_bytes)
+    return await enveloped(ConvertResult, convert_bytes(content, source=path.name, name=path.name))
 
 
 @app.command(name="query")

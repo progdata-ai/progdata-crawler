@@ -14,6 +14,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from progdata_crawler import __version__
+from progdata_crawler.core.convert.documents import (
+    MAX_DOCUMENT_BYTES,
+    convert_bytes,
+    convert_url,
+)
 from progdata_crawler.core.crawler import Crawler
 from progdata_crawler.core.discover import discover_envelope
 from progdata_crawler.core.envelopes import enveloped
@@ -26,6 +31,8 @@ from progdata_crawler.core.jobs.queue import JobHandler
 from progdata_crawler.core.store.query import query_pages
 from progdata_crawler.models import (
     BulkRequest,
+    ConvertRequest,
+    ConvertResult,
     DiscoverRequest,
     DiscoverResult,
     Envelope,
@@ -85,6 +92,21 @@ async def _enveloped[T](
         result_type, operation, request_id=request.headers.get(REQUEST_ID_HEADER)
     )
     return _envelope_response(envelope)
+
+
+async def _convert_upload(request: Request, name: str) -> ConvertResult:
+    """Read the body up to the size limit, then convert it."""
+    content = bytearray()
+    async for chunk in request.stream():
+        content += chunk
+        if len(content) > MAX_DOCUMENT_BYTES:
+            raise CrawlerError(
+                ErrorCode.UNSUPPORTED_TYPE,
+                f"the document is larger than {MAX_DOCUMENT_BYTES} bytes",
+                max_bytes=MAX_DOCUMENT_BYTES,
+            )
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    return await convert_bytes(bytes(content), source=name, content_type=content_type, name=name)
 
 
 async def _raise(error: CrawlerError) -> Job:
@@ -207,6 +229,41 @@ def create_app(
         crawler: Crawler = request.app.state.crawler
         provider: SearchProvider = request.app.state.search
         return await _enveloped(FindResult, find(crawler, provider, body), request)
+
+    @app.post(
+        "/v1/convert",
+        response_model=Envelope[ConvertResult],
+        responses=ERROR_RESPONSES,
+        summary="Convert a document at a URL",
+        description="Fetch a PDF, DOCX or XLSX document and convert it to markdown.",
+    )
+    async def convert(  # pyright: ignore[reportUnusedFunction]
+        body: ConvertRequest, request: Request
+    ) -> JSONResponse:
+        crawler: Crawler = request.app.state.crawler
+        return await _enveloped(ConvertResult, convert_url(crawler, str(body.url)), request)
+
+    @app.post(
+        "/v1/convert/file",
+        response_model=Envelope[ConvertResult],
+        responses=ERROR_RESPONSES,
+        summary="Convert an uploaded document",
+        description="Send a PDF, DOCX or XLSX file as the request body (up to 25 MB) and "
+        "get it back as markdown. `name` is the file name, used as the source.",
+        openapi_extra={
+            "requestBody": {
+                "required": True,
+                "content": {
+                    "application/octet-stream": {"schema": {"type": "string", "format": "binary"}}
+                },
+            }
+        },
+    )
+    async def convert_file(  # pyright: ignore[reportUnusedFunction]
+        request: Request,
+        name: Annotated[str, Query(min_length=1, max_length=255)] = "upload",
+    ) -> JSONResponse:
+        return await _enveloped(ConvertResult, _convert_upload(request, name), request)
 
     @app.post(
         "/v1/query",

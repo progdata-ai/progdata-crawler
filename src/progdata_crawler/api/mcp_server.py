@@ -13,9 +13,11 @@ from mcp.types import ToolAnnotations
 from pydantic import Field, ValidationError
 
 from progdata_crawler import __version__
+from progdata_crawler.core.convert.documents import convert_url
 from progdata_crawler.core.crawler import Crawler
 from progdata_crawler.core.discover import discover_envelope
 from progdata_crawler.core.envelopes import enveloped
+from progdata_crawler.core.find import SearchProvider, create_provider, find
 from progdata_crawler.core.jobs.handlers import job_handlers
 from progdata_crawler.core.jobs.manager import JobManager
 from progdata_crawler.core.store.query import query_pages
@@ -23,6 +25,7 @@ from progdata_crawler.models import (
     DEFAULT_OUTPUTS,
     BulkRequest,
     ContentMode,
+    ConvertResult,
     Device,
     DiscoverRequest,
     DiscoverResult,
@@ -30,6 +33,8 @@ from progdata_crawler.models import (
     ErrorCode,
     ErrorInfo,
     FetchRequest,
+    FindRequest,
+    FindResult,
     HarvestRequest,
     JobKind,
     JobView,
@@ -41,6 +46,8 @@ from progdata_crawler.models import (
     RenderMode,
     Retention,
     Scope,
+    SearchSource,
+    TimeRange,
 )
 from progdata_crawler.models.jobs import MAX_JOB_WAIT_S
 from progdata_crawler.settings import Settings
@@ -130,7 +137,24 @@ def _invalid[T](result_type: type[T], error: ValidationError) -> Envelope[T]:
     )
 
 
-def create_server(settings: Settings, *, store_path: str | None = None) -> MCPServer[None]:
+FIND_DESCRIPTION = (
+    "Search the web. Returns hits with URL, title and snippet. With fetch=true every web and "
+    "news hit is also fetched and returned with the requested outputs (markdown by "
+    "default), so one call gives search results you can read."
+)
+
+CONVERT_DESCRIPTION = (
+    "Fetch a PDF, DOCX or XLSX document from a URL and return it as markdown. (pdc_fetch "
+    "also converts documents; this tool returns only the document's markdown and title.)"
+)
+
+
+def create_server(
+    settings: Settings,
+    *,
+    store_path: str | None = None,
+    search_provider: SearchProvider | None = None,
+) -> MCPServer[None]:
     """Build the MCP server. The crawler starts with the server and stops with it."""
     running: dict[str, Any] = {}
 
@@ -140,12 +164,15 @@ def create_server(settings: Settings, *, store_path: str | None = None) -> MCPSe
             Crawler(settings, store_path=store_path) as crawler,
             JobManager(settings, job_handlers(crawler), page_store=crawler.store) as jobs,
         ):
+            provider = search_provider or create_provider(settings)
             running["crawler"] = crawler
             running["jobs"] = jobs
+            running["search"] = provider
             try:
                 yield None
             finally:
                 running.clear()
+                await provider.aclose()
 
     def crawler() -> Crawler:
         return running["crawler"]
@@ -246,6 +273,60 @@ def create_server(settings: Settings, *, store_path: str | None = None) -> MCPSe
         except ValidationError as error:
             return _invalid(QueryResult, error)
         return await enveloped(QueryResult, query_pages(crawler().store, request))
+
+    @server.tool(
+        name="pdc_find",
+        title="Search the web",
+        description=FIND_DESCRIPTION,
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+    )
+    async def pdc_find(  # pyright: ignore[reportUnusedFunction]
+        query: Annotated[str, Field(description="What to search for.")],
+        sources: Annotated[
+            tuple[SearchSource, ...], Field(description="web, news and/or images.")
+        ] = (SearchSource.WEB,),
+        time_range: Annotated[
+            TimeRange | None, Field(description="Only results from the last day/week/month/year.")
+        ] = None,
+        limit: Annotated[int, Field(description="Most results per source (1-20).")] = 10,
+        country: Annotated[str | None, Field(description="Country code, e.g. 'NO'.")] = None,
+        language: Annotated[str | None, Field(description="Language code, e.g. 'nb'.")] = None,
+        fetch: Annotated[bool, Field(description="Also fetch every web and news hit.")] = False,
+        outputs: Outputs = (Output.MARKDOWN,),
+    ) -> Envelope[FindResult]:
+        try:
+            request = FindRequest.model_validate(
+                {
+                    "query": query,
+                    "sources": sources,
+                    "time_range": time_range,
+                    "limit": limit,
+                    "country": country,
+                    "language": language,
+                    "fetch": {"outputs": outputs} if fetch else None,
+                }
+            )
+        except ValidationError as error:
+            return _invalid(FindResult, error)
+        return await enveloped(FindResult, find(crawler(), running["search"], request))
+
+    @server.tool(
+        name="pdc_convert",
+        title="Convert a document",
+        description=CONVERT_DESCRIPTION,
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+    )
+    async def pdc_convert(  # pyright: ignore[reportUnusedFunction]
+        url: Annotated[str, Field(description="The http(s) URL of the document.")],
+    ) -> Envelope[ConvertResult]:
+        if not url.startswith(("http://", "https://")):
+            return Envelope[ConvertResult](
+                meta=Meta(request_id="invalid", took_ms=0),
+                error=ErrorInfo(
+                    code=ErrorCode.INVALID_REQUEST, message="url: must be an http(s) URL"
+                ),
+            )
+        return await enveloped(ConvertResult, convert_url(crawler(), url))
 
     @server.tool(
         name="pdc_discover",
