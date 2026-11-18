@@ -191,6 +191,20 @@ Set with environment variables, or in a `.env` file in the working directory.
 
 Logs go to stderr.
 
+## Web search
+
+Find searches the web through a search provider. The default is the [Brave Search API](https://brave.com/search/api/): set `PDC_BRAVE_API_KEY`.
+
+To search through a SearXNG instance you run yourself instead, start the one in `docker-compose.yml` and point progdata-crawler at it:
+
+```bash
+export SEARXNG_SECRET=$(openssl rand -hex 32)
+docker compose up -d                     # SearXNG on http://127.0.0.1:8888
+export PDC_SEARCH_PROVIDER=searxng PDC_SEARXNG_URL=http://127.0.0.1:8888
+```
+
+SearXNG collects results from other search engines. Our settings (`deploy/searxng/settings.yml`) enable only engines that use an official API: Wikipedia, Wikidata, Wikinews, Wikimedia Commons and Openverse. SearXNG can also scrape the result pages of search engines, and many of them forbid that. If you enable more engines, making sure they allow automated queries is your responsibility.
+
 ## Webhooks
 
 Harvest and bulk jobs accept a `notify_url`. It receives a POST when the job starts and when it ends (`job.started`, `job.succeeded`, `job.failed`, `job.cancelled`, `job.interrupted`). The body is `{"event": ..., "job": {...}}` with the job's status and progress, never page content.

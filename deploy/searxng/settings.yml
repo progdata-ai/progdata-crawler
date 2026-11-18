@@ -1,0 +1,34 @@
+# SearXNG settings for progdata-crawler.
+#
+# Only engines that get their results through an official, public API are enabled.
+# SearXNG can also scrape the result pages of search engines, and many of them forbid
+# that in their robots.txt or terms. If you enable more engines, checking that they
+# allow automated queries is your responsibility.
+
+use_default_settings:
+  engines:
+    keep_only:
+      - wikipedia          # general: the MediaWiki API
+      - wikidata           # general: the Wikidata API
+      - wikinews           # news: the MediaWiki API
+      - wikicommons.images # images: the Wikimedia Commons API
+      - openverse          # images: the Openverse API
+
+general:
+  instance_name: "progdata-crawler search"
+
+server:
+  # Set SEARXNG_SECRET in the environment; docker compose refuses to start without it.
+  secret_key: "set-by-the-SEARXNG_SECRET-environment-variable"
+  limiter: false
+  public_instance: false
+  image_proxy: false
+
+search:
+  formats:
+    - html
+    - json
+
+engines:
+  - name: openverse
+    disabled: false
