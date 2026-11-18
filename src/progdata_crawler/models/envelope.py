@@ -27,6 +27,8 @@ class ErrorCode(StrEnum):
     """The content type cannot be handled."""
     SEARCH_UNAVAILABLE = "search_unavailable"
     """Web search is not configured, or the search provider failed."""
+    LLM_UNAVAILABLE = "llm_unavailable"
+    """The LLM is not configured, refused the request or failed to answer in time."""
     NOT_FOUND = "not_found"
     """The job or other resource does not exist, or no longer exists."""
     QUOTA_EXCEEDED = "quota_exceeded"
@@ -50,6 +52,7 @@ _HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.BLOCKED_BY_SITE: 502,
     ErrorCode.UNSUPPORTED_TYPE: 415,
     ErrorCode.SEARCH_UNAVAILABLE: 503,
+    ErrorCode.LLM_UNAVAILABLE: 503,
     ErrorCode.NOT_FOUND: 404,
     ErrorCode.QUOTA_EXCEEDED: 429,
     ErrorCode.INTERNAL_ERROR: 500,

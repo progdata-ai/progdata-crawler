@@ -171,6 +171,7 @@ The same options work in the CLI, the MCP tool and the REST API.
 | `fetch_timeout` | 504 | The page did not respond within `timeout_ms` |
 | `fetch_failed` | 502 | DNS failure, refused connection, broken TLS, too many redirects |
 | `unsupported_type` | 415 | Neither an HTML page nor a PDF, DOCX or XLSX document, a damaged document, or larger than 10 MB |
+| `llm_unavailable` | 503 | The LLM is not configured, refused the request or did not answer in time |
 | `search_unavailable` | 503 | Web search is not configured (no API key), or the search provider failed |
 | `not_found` | 404 | No job with this id, or it has been deleted |
 | `internal_error` | 500 | Something went wrong on our side |
@@ -192,6 +193,13 @@ Set with environment variables, or in a `.env` file in the working directory.
 | `PDC_BULK_CONCURRENCY` | 8 | Pages bulk jobs fetch at the same time, across all bulk jobs |
 | `PDC_SEARCH_PROVIDER` | `brave` | The search provider for find: `brave` (the web) or `local` (pages already fetched) |
 | `PDC_BRAVE_API_KEY` | unset | Key for the [Brave Search API](https://brave.com/search/api/), the default search provider |
+| `PDC_LLM_PROVIDER` | unset | `anthropic`, `azure_openai` or `ollama`, for summaries and structured extraction. Unset: those features are off |
+| `PDC_LLM_MODEL` | provider default | Model name; for Azure OpenAI the deployment name. Anthropic defaults to `claude-sonnet-5-5` |
+| `PDC_ANTHROPIC_API_KEY` | unset | Key for the Anthropic API |
+| `PDC_AZURE_OPENAI_ENDPOINT`, `PDC_AZURE_OPENAI_API_KEY`, `PDC_AZURE_OPENAI_API_VERSION` | unset | Azure OpenAI |
+| `PDC_OLLAMA_URL` | `http://localhost:11434/v1` | A local Ollama server |
+| `PDC_LLM_TIMEOUT_S` | 60 | Time limit for one LLM call |
+| `PDC_LLM_MAX_INPUT_CHARS` | 100 000 | Longer input is cut before it is sent |
 | `PDC_WEBHOOK_SECRET` | unset | Key that signs webhooks to `notify_url`. Jobs with a `notify_url` are refused while unset |
 | `PDC_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR` |
 | `PDC_LOG_FORMAT` | `text` | `text` or `json` (one object per line) |
@@ -215,6 +223,17 @@ pdc find "asyncio timeout"
 ```
 
 Only pages you fetched can be found, and only as long as the retention settings keep them (`PDC_RETENTION_DAYS`). The local index holds web pages only: asking for `news` or `images` gives no hits and a note in `notes`. `time_range` filters on when a page was fetched. With `fetch`, hits come from the cache when it is fresh enough; otherwise they are fetched again, robots.txt included.
+
+## LLM
+
+Summaries and structured extraction use the LLM set with `PDC_LLM_PROVIDER`. Check that it works with:
+
+```bash
+export PDC_LLM_PROVIDER=ollama PDC_LLM_MODEL=llama3.2   # or anthropic with PDC_ANTHROPIC_API_KEY
+pdc llm-check
+```
+
+Page content is sent to the provider you choose, so pick one whose terms fit your data; a local Ollama keeps everything on your machine. Prompts and page content are never logged, only the provider, model, token counts and time. Calls to hosted APIs are checked against the API host's robots.txt like any other request.
 
 ## Webhooks
 
