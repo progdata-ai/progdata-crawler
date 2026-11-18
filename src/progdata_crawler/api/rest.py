@@ -7,18 +7,19 @@ code in `error.code` and the matching HTTP status. Start it with `progdata-crawl
 import logging
 import time
 import uuid
-from collections.abc import AsyncGenerator, Awaitable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Mapping
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from progdata_crawler import __version__
 from progdata_crawler.core.crawler import Crawler
 from progdata_crawler.core.discover import discover_envelope
 from progdata_crawler.core.errors import CrawlerError
+from progdata_crawler.core.jobs.events import job_events
 from progdata_crawler.core.jobs.manager import JobManager
 from progdata_crawler.core.jobs.queue import JobHandler
 from progdata_crawler.models import (
@@ -29,6 +30,8 @@ from progdata_crawler.models import (
     ErrorInfo,
     FetchRequest,
     Job,
+    JobEvent,
+    JobEventType,
     JobKind,
     JobView,
     Meta,
@@ -83,6 +86,25 @@ async def _enveloped[T](
         error = ErrorInfo(code=ErrorCode.INTERNAL_ERROR, message="unexpected internal error")
     meta = Meta(request_id=request_id, took_ms=round((time.monotonic() - started) * 1000))
     return _envelope_response(Envelope[result_type](data=data, meta=meta, error=error))
+
+
+async def _raise(error: CrawlerError) -> Job:
+    raise error
+
+
+def format_event(event: JobEvent) -> str:
+    """One event in the Server-Sent Events wire format."""
+    if event.type is JobEventType.KEEP_ALIVE:
+        return ": keep-alive\n\n"
+    payload = event.job if event.type is JobEventType.JOB else event.result
+    data = payload.model_dump_json() if payload is not None else "{}"
+    return f"id: {event.id}\nevent: {event.type.value}\ndata: {data}\n\n"
+
+
+async def _sse(events: AsyncIterator[JobEvent], first: JobEvent) -> AsyncIterator[str]:
+    yield format_event(first)
+    async for event in events:
+        yield format_event(event)
 
 
 def create_app(
@@ -175,6 +197,37 @@ def create_app(
     ) -> JSONResponse:
         jobs: JobManager = request.app.state.jobs
         return await _enveloped(JobView, jobs.view(job_id, cursor=cursor, limit=limit), request)
+
+    @app.get(
+        "/v1/jobs/{job_id}/events",
+        response_class=StreamingResponse,
+        responses={
+            200: {"content": {"text/event-stream": {}}, "description": "The event stream"},
+            404: ERROR_RESPONSES[404],
+        },
+        summary="Live job events (Server-Sent Events)",
+        description="First the job's current state (`job`), then each finished page "
+        "(`result`) and every status or progress change (`job`). The stream ends when the "
+        "job has finished. Every event id is the `seq` of the last result sent; reconnect "
+        "with `Last-Event-ID` to continue after it.",
+    )
+    async def job_events_stream(  # pyright: ignore[reportUnusedFunction]
+        job_id: str,
+        request: Request,
+        last_event_id: Annotated[int | None, Header(ge=0)] = None,
+        cursor: Annotated[int, Query(ge=0)] = 0,
+    ) -> Response:
+        jobs: JobManager = request.app.state.jobs
+        events = aiter(job_events(jobs, job_id, after=last_event_id or cursor))
+        try:
+            first = await anext(events)  # raises not_found before the stream starts
+        except CrawlerError as error:
+            return await _enveloped(Job, _raise(error), request)
+        return StreamingResponse(
+            _sse(events, first),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.delete(
         "/v1/jobs/{job_id}",
