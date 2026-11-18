@@ -139,3 +139,23 @@ def _human_readable(page: Page) -> str:
     if page.markdown is not None:
         return page.markdown
     return page.model_dump_json(indent=2, exclude_none=True)
+
+
+@app.command()
+def mcp(
+    http: Annotated[
+        bool, typer.Option("--http", help="Serve streamable HTTP instead of stdio.")
+    ] = False,
+    host: Annotated[str, typer.Option(help="Interface for --http.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port for --http.")] = 8765,
+) -> None:
+    """Run the MCP server, over stdio by default (for Claude Desktop and Claude Code)."""
+    from progdata_crawler.api.mcp_server import create_server
+
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_format)  # logs go to stderr
+    server = create_server(settings)
+    if http:
+        server.run("streamable-http", host=host, port=port)
+    else:
+        server.run("stdio")
