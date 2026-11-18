@@ -26,6 +26,7 @@ from progdata_crawler.core.jobs.events import job_events
 from progdata_crawler.core.jobs.handlers import job_handlers
 from progdata_crawler.core.jobs.manager import JobManager
 from progdata_crawler.core.jobs.notify import create_notifier
+from progdata_crawler.core.research.agent import research
 from progdata_crawler.core.store.query import query_pages
 from progdata_crawler.core.structure.llm import LlmAnswer, create_llm
 from progdata_crawler.core.structure.service import structure
@@ -58,6 +59,7 @@ from progdata_crawler.models import (
     SearchSource,
     TimeRange,
 )
+from progdata_crawler.models.research import ResearchAnswer, ResearchRequest
 from progdata_crawler.models.structure_request import StructureRequest, StructureResult
 from progdata_crawler.models.watch import CheckStatus, Watch, WatchCheck, WatchCreate
 from progdata_crawler.settings import Settings, get_settings
@@ -762,6 +764,55 @@ def watch_run() -> None:
     settings = _watch_settings()
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(_with_watches(settings, forever, schedule=True))
+
+
+@app.command(name="research")
+def research_command(
+    question: Annotated[str, typer.Argument(help="The question to answer.")],
+    max_pages: Annotated[int, typer.Option(help="Most pages to read.")] = 8,
+    max_rounds: Annotated[int, typer.Option(help="Rounds of searching.")] = 2,
+    max_seconds: Annotated[int, typer.Option(help="Time for searching and reading.")] = 120,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print the full response envelope as JSON.")
+    ] = False,
+) -> None:
+    """Answer a question from the web, with the sources it read."""
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_format)
+    try:
+        request = ResearchRequest(
+            question=question,
+            max_pages=max_pages,
+            max_rounds=max_rounds,
+            max_seconds=max_seconds,
+        )
+    except ValidationError as error:
+        raise _invalid_options(error) from error
+    envelope = asyncio.run(_research(_local(settings), request))
+    if as_json:
+        typer.echo(envelope.model_dump_json(indent=2, exclude_none=True))
+    elif envelope.error is not None:
+        typer.echo(f"Error ({envelope.error.code.value}): {envelope.error.message}", err=True)
+    elif envelope.data is not None:
+        result = envelope.data
+        typer.echo(result.answer.strip())
+        if result.sources:
+            typer.echo("\nSources:")
+            for source in result.sources:
+                typer.echo(f"[{source.number}] {source.title} - {source.url}")
+        for note in result.notes:
+            typer.echo(f"Note: {note}", err=True)
+    if envelope.error is not None:
+        raise typer.Exit(1)
+
+
+async def _research(settings: Settings, request: ResearchRequest) -> Envelope[ResearchAnswer]:
+    async with Crawler(settings) as crawler:
+        provider = create_provider(settings, robots=crawler.check_robots, store=crawler.store)
+        try:
+            return await enveloped(ResearchAnswer, research(crawler, provider, request))
+        finally:
+            await provider.aclose()
 
 
 @app.command(name="query")

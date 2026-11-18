@@ -29,6 +29,7 @@ from progdata_crawler.core.jobs.handlers import job_handlers as default_job_hand
 from progdata_crawler.core.jobs.manager import JobManager
 from progdata_crawler.core.jobs.notify import create_notifier
 from progdata_crawler.core.jobs.queue import JobHandler
+from progdata_crawler.core.research.agent import research
 from progdata_crawler.core.session.browser_session import SessionManager
 from progdata_crawler.core.store.query import query_pages
 from progdata_crawler.core.structure.llm import Llm
@@ -61,6 +62,7 @@ from progdata_crawler.models import (
     SessionView,
 )
 from progdata_crawler.models.jobs import MAX_JOB_WAIT_S, MAX_RESULTS_PER_REQUEST
+from progdata_crawler.models.research import ResearchAnswer, ResearchRequest
 from progdata_crawler.models.structure_request import StructureRequest, StructureResult
 from progdata_crawler.models.watch import Watch, WatchCheck, WatchCreate, WatchList
 from progdata_crawler.settings import Settings
@@ -407,6 +409,25 @@ def create_app(
     async def remove_watch(watch_id: str, request: Request) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
         watches: WatchService = request.app.state.watches
         return await _enveloped(Watch, watches.remove(watch_id), request)
+
+    @app.post(
+        "/v1/research",
+        response_model=Envelope[ResearchAnswer],
+        responses={
+            **ERROR_RESPONSES,
+            503: {"model": Envelope[Page], "description": "llm_unavailable or search_unavailable"},
+        },
+        summary="Research a question",
+        description="Search the web, read the best pages and answer with numbered sources. "
+        "Every cited source was fetched and read. Bounded by `max_rounds`, `max_searches`, "
+        "`max_pages` and `max_seconds`.",
+    )
+    async def research_endpoint(  # pyright: ignore[reportUnusedFunction]
+        body: ResearchRequest, request: Request
+    ) -> JSONResponse:
+        crawler: Crawler = request.app.state.crawler
+        provider: SearchProvider = request.app.state.search
+        return await _enveloped(ResearchAnswer, research(crawler, provider, body), request)
 
     @app.post(
         "/v1/query",
