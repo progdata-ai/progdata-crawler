@@ -147,7 +147,7 @@ The same options work in the CLI, the MCP tool and the REST API.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `outputs` | `markdown`, `metadata` | Any of `markdown`, `html` (cleaned), `raw_html`, `links`, `images`, `metadata`, `screenshot` (base64 PNG) |
+| `outputs` | `markdown`, `metadata` | Any of `markdown`, `html` (cleaned), `raw_html`, `links`, `images`, `metadata`, `screenshot` (base64 PNG), `summary` (written by the LLM; see below) |
 | `content` | `main` | `main` for the main content only, `full` for the whole page |
 | `tags` | none | CSS selectors: `include` keeps only those elements, `exclude` removes them |
 | `render` | `auto` | When to use the browser: `auto` (when the page needs JavaScript), `always`, `never` |
@@ -242,7 +242,7 @@ Only pages you fetched can be found, and only as long as the retention settings 
 
 ## LLM
 
-Summaries and structured extraction use the LLM set with `PDC_LLM_PROVIDER`. Check that it works with:
+Summaries and structured extraction use the LLM set with `PDC_LLM_PROVIDER`. With the `summary` output, every page (in fetch, harvest, bulk and find) gets a few sentences in its own language. Without an LLM the page still comes back, with the reason in `output_errors.summary`. Check that it works with:
 
 ```bash
 export PDC_LLM_PROVIDER=ollama PDC_LLM_MODEL=llama3.2   # or anthropic with PDC_ANTHROPIC_API_KEY

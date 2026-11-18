@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from progdata_crawler.models.envelope import ErrorInfo
 from progdata_crawler.models.steps import Capture
 
 
@@ -57,5 +58,10 @@ class Page(_Model):
     metadata: PageMetadata | None = None
     screenshot: str | None = None
     """PNG, base64-encoded."""
+    summary: str | None = None
+    """A short summary written by the LLM, in the page's own language."""
+    output_errors: dict[str, ErrorInfo] | None = None
+    """Outputs that could not be made, by output name (for example `summary` when no LLM
+    is configured). The rest of the page is fine."""
     captures: tuple[Capture, ...] | None = None
     """The page at each `capture` step, when the request had steps."""

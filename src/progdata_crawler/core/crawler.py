@@ -37,6 +37,7 @@ from progdata_crawler.core.extract.images import extract_images
 from progdata_crawler.core.extract.links import extract_links
 from progdata_crawler.core.extract.markdown import to_markdown
 from progdata_crawler.core.extract.meta import extract_metadata
+from progdata_crawler.core.extract.summary import summarize
 from progdata_crawler.core.fetch.browser import BrowserPool, RawCapture
 from progdata_crawler.core.fetch.detect import (
     check_render_options,
@@ -54,6 +55,7 @@ from progdata_crawler.core.polite.ratelimit import BACKOFF_STATUSES, DomainRateL
 from progdata_crawler.core.polite.robots import RobotsPolicy, RobotsRules
 from progdata_crawler.core.store.cache import PageCache
 from progdata_crawler.core.store.sqlite import PageStore
+from progdata_crawler.core.structure.llm import Llm, create_llm
 from progdata_crawler.models.convert import ConvertResult
 from progdata_crawler.models.envelope import Envelope, ErrorCode, ErrorInfo, Meta
 from progdata_crawler.models.fetch import FetchRequest
@@ -67,7 +69,7 @@ log = logging.getLogger(__name__)
 PAGE_TYPES = HTML_TYPES | DOCUMENT_TYPES | GENERIC_TYPES
 """What fetch accepts: HTML pages, and documents it converts to markdown."""
 
-NOT_YET_AVAILABLE = frozenset({Output.SUMMARY, Output.STRUCTURED, Output.DIFF})
+NOT_YET_AVAILABLE = frozenset({Output.STRUCTURED, Output.DIFF})
 """Outputs that later phases add."""
 
 
@@ -179,8 +181,16 @@ def _document_page(source: _Source, wanted: set[Output]) -> Page:
 class Crawler:
     """Use as an async context manager. Safe to share between concurrent requests."""
 
-    def __init__(self, settings: Settings, *, store_path: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        store_path: Path | str | None = None,
+        llm: Llm | None = None,
+    ) -> None:
+        """`llm` replaces the LLM from settings (tests use a fake model)."""
         self.settings = settings
+        self._llm = llm
         # Unset means protected: entry points that run on the user's own machine opt out.
         self._guard = AddressGuard(allow_private=bool(settings.allow_private_networks))
         self._http = HttpFetcher(
@@ -235,9 +245,42 @@ class Crawler:
 
         source = await self._fetch_source(url, options)
         page = await asyncio.to_thread(build_page, source, options)
-        if cacheable:
+        if Output.SUMMARY in options.outputs:
+            page = await self._add_summary(page, source, options)
+        # A page with a missing output is not cached, so the next request tries again
+        # (for example once an LLM is configured).
+        if cacheable and not page.output_errors:
             await self._cache.put(url, options, page, rendered=source.rendered)
         return FetchOutcome(page, cached=False, rendered=source.rendered)
+
+    def llm(self) -> Llm:
+        """The configured LLM. Raises `llm_unavailable` when there is none."""
+        if self._llm is None:
+            self._llm = create_llm(self.settings, robots=self.check_robots)
+        return self._llm
+
+    async def _add_summary(self, page: Page, source: _Source, options: PageOptions) -> Page:
+        markdown = page.markdown
+        if markdown is None:
+            markdown = (
+                source.document.markdown
+                if source.document is not None
+                else await asyncio.to_thread(
+                    to_markdown, source.html, source.url, content=options.content, tags=options.tags
+                )
+            )
+        if page.metadata is not None:
+            title = page.metadata.title
+        elif source.document is not None:
+            title = source.document.title
+        else:
+            title = (await asyncio.to_thread(extract_metadata, source.html, source.url)).title
+        try:
+            summary = await summarize(self.llm(), markdown, title=title)
+        except CrawlerError as error:
+            errors = {**(page.output_errors or {}), Output.SUMMARY.value: error.to_error_info()}
+            return page.model_copy(update={"output_errors": errors})
+        return page.model_copy(update={"summary": summary})
 
     async def fetch_document(
         self,
@@ -336,9 +379,9 @@ class Crawler:
         )
 
     async def _document_source(self, response: HttpResponse, options: PageOptions) -> _Source:
-        """Convert a document response. Markdown is only converted when asked for."""
+        """Convert a document response, when markdown or a summary is asked for."""
         document = None
-        if Output.MARKDOWN in options.outputs:
+        if Output.MARKDOWN in options.outputs or Output.SUMMARY in options.outputs:
             document = await convert_bytes(
                 response.content,
                 source=response.url,
