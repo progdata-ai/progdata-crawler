@@ -1,8 +1,9 @@
 """End to end for phase 3: a web search that fetches its hits, and PDF, DOCX and XLSX
 converted to markdown, through the REST API, the CLI and the MCP server.
 
-Search uses the real SearXNG provider. The local test site plays the SearXNG instance:
-it answers /search with hits that point at its own pages.
+Search uses the real Brave provider. The local test site plays the Brave Search API: it
+answers /res/v1/web/search with hits that point at its own pages, and its robots.txt
+applies to the API calls like to any other request.
 """
 
 import asyncio
@@ -28,26 +29,26 @@ DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 XLSX_TABLE = "| Flour | Grams |\n| --- | --- |\n| Rye | 300 |\n| Wheat | 700 |"
 
 
-def searxng_answer(site: SiteServer) -> str:
+def brave_answer(site: SiteServer) -> str:
     results = [
-        {"url": site.url("/article.html"), "title": "How we bake", "content": "Sourdough."},
-        {"url": site.url("/files/sample.pdf"), "title": "A PDF", "content": "A document."},
-        {"url": site.url("/private/staff.html"), "title": "Staff", "content": "Not for us."},
+        {"url": site.url("/article.html"), "title": "How we bake", "description": "Sourdough."},
+        {"url": site.url("/files/sample.pdf"), "title": "A PDF", "description": "A document."},
+        {"url": site.url("/private/staff.html"), "title": "Staff", "description": "Not for us."},
     ]
-    return json.dumps({"query": "sourdough", "results": results})
+    return json.dumps({"type": "search", "web": {"results": results}})
 
 
 @pytest.fixture(autouse=True)
 def site(test_site: SiteServer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     test_site.add("/robots.txt", "User-agent: *\nDisallow: /private/\n", content_type="text/plain")
-    test_site.add("/search", searxng_answer(test_site), content_type="application/json")
+    test_site.add("/res/v1/web/search", brave_answer(test_site), content_type="application/json")
     test_site.add("/files/notes.docx", build_docx(), content_type=DOCX)
     for name, value in {
         "PDC_DATA_DIR": str(tmp_path / "cli"),
         "PDC_RATE_LIMIT_INTERVAL_S": "0.1",
         "PDC_LOG_LEVEL": "WARNING",
-        "PDC_SEARCH_PROVIDER": "searxng",
-        "PDC_SEARXNG_URL": test_site.url("/").rstrip("/"),
+        "PDC_BRAVE_API_KEY": "test-key",
+        "PDC_BRAVE_API_URL": test_site.url("/res/v1"),
     }.items():
         monkeypatch.setenv(name, value)
     get_settings.cache_clear()
@@ -56,12 +57,12 @@ def site(test_site: SiteServer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
 
 def settings(tmp_path: Path, name: str) -> Settings:
-    return Settings(data_dir=tmp_path / name)
+    return Settings(data_dir=tmp_path / name)  # the Brave settings come from the environment
 
 
 def check_find(data: dict[str, Any], site: SiteServer) -> None:
     hits = {hit["url"]: hit for hit in data["hits"]}
-    assert data["provider"] == "searxng"
+    assert data["provider"] == "brave"
     assert hits[site.url("/article.html")]["page"]["markdown"].startswith(
         "# How we bake our sourdough"
     )
@@ -155,3 +156,11 @@ async def test_same_result_everywhere(tmp_path: Path, test_site: SiteServer) -> 
 
     assert urls(via_rest) == urls(via_mcp) == urls(via_cli)
     assert len(urls(via_rest)) == 3
+
+
+def test_search_respects_robots_txt_too(tmp_path: Path, test_site: SiteServer) -> None:
+    test_site.add("/robots.txt", "User-agent: *\nDisallow: /res/\n", content_type="text/plain")
+    with TestClient(create_app(settings(tmp_path, "rest"))) as client:
+        response = client.post("/v1/find", json={"query": "sourdough"})
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "robots_disallowed"

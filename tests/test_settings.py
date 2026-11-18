@@ -76,7 +76,6 @@ def test_rejects_invalid_values(monkeypatch: pytest.MonkeyPatch, name: str, valu
         Settings()
 
 
-def test_robots_allowlist_is_read_as_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert Settings().robots_allowlist == ()
-    monkeypatch.setenv("PDC_ROBOTS_ALLOWLIST", '["progdata.no", "example.org"]')
-    assert Settings().robots_allowlist == ("progdata.no", "example.org")
+def test_there_is_no_way_to_skip_robots_txt(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PDC_ROBOTS_ALLOWLIST", '["example.org"]')
+    assert not any("robots" in name for name in Settings.model_fields)

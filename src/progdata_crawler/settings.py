@@ -40,8 +40,6 @@ class LogFormat(StrEnum):
 class SearchProviderName(StrEnum):
     BRAVE = "brave"
     """The Brave Search API. Needs `PDC_BRAVE_API_KEY`."""
-    SEARXNG = "searxng"
-    """A SearXNG instance you run. Needs `PDC_SEARXNG_URL`."""
 
 
 class Settings(BaseSettings):
@@ -66,9 +64,6 @@ class Settings(BaseSettings):
     """Whether fetching internal addresses (127.0.0.1, 10.x, 169.254.169.254 ...) is allowed.
     Unset: allowed for the CLI and MCP over stdio, which run on your own machine, and
     refused for `serve` and `mcp --http`, which others can reach."""
-    robots_allowlist: tuple[str, ...] = ()
-    """Domains where robots.txt is not applied: our own sites and sites that have given
-    us permission. Subdomains are included. Set as JSON, e.g. `["progdata.no"]`."""
     browser_executable: Path | None = None
     """Chromium to use instead of the one Playwright installs. Leave unset normally."""
     browser_max_pages: int = Field(default=4, ge=1, le=32)
@@ -87,8 +82,8 @@ class Settings(BaseSettings):
     """Which search provider find uses."""
     brave_api_key: SecretStr | None = None
     """Key for the Brave Search API."""
-    searxng_url: str | None = None
-    """Address of a SearXNG instance, for example http://localhost:8888."""
+    brave_api_url: str = "https://api.search.brave.com/res/v1"
+    """Address of the Brave Search API. Change it only for tests."""
     log_level: LogLevel = LogLevel.INFO
     log_format: LogFormat = LogFormat.TEXT
 

@@ -38,10 +38,6 @@ jobs:
       - name: Install Chromium for browser tests
         if: steps.browser-cache.outputs.cache-hit != 'true'
         run: uv run --no-sync playwright install chromium
-      - name: Check docker-compose.yml
-        run: docker compose config --quiet
-        env:
-          SEARXNG_SECRET: ci-only
       - name: Check formatting
         run: uv run --no-sync ruff format --check .
       - name: Lint

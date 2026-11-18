@@ -8,12 +8,13 @@ Rules follow RFC 9309:
   unavailable: everything is disallowed until we try again.
 - A robots.txt that cannot be parsed is read as leniently as possible.
 
-robots.txt is fetched once per origin (scheme, host and port) and cached.
+robots.txt is fetched once per origin (scheme, host and port) and cached. It applies to
+every request we make to a site, without exceptions: there is no allowlist.
 """
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -93,10 +94,6 @@ def origin_of(url: str) -> str:
     return f"{parts.scheme.lower()}://{netloc}"
 
 
-def _host_matches(host: str, domains: frozenset[str]) -> bool:
-    return any(host == domain or host.endswith("." + domain) for domain in domains)
-
-
 @dataclass
 class _Entry:
     rules: RobotsRules
@@ -110,24 +107,17 @@ class RobotsPolicy:
         self,
         fetcher: RobotsFetcher,
         *,
-        allowlist: Iterable[str] = (),
         ttl_s: float = DEFAULT_TTL_S,
         unavailable_ttl_s: float = UNAVAILABLE_TTL_S,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        """`allowlist` holds domains where robots.txt is not applied: our own sites
-        and sites that have given us permission. Subdomains are included."""
+        """robots.txt applies to every URL, without exceptions."""
         self._fetcher = fetcher
-        self._allowlist = frozenset(domain.lower().strip(".") for domain in allowlist)
         self._ttl_s = ttl_s
         self._unavailable_ttl_s = unavailable_ttl_s
         self._clock = clock
         self._cache: dict[str, _Entry] = {}
         self._locks: dict[str, asyncio.Lock] = {}
-
-    def is_allowlisted(self, url: str) -> bool:
-        host = urlsplit(url).hostname or ""
-        return _host_matches(host.lower(), self._allowlist)
 
     async def rules_for(self, url: str) -> RobotsRules:
         origin = origin_of(url)
@@ -145,8 +135,6 @@ class RobotsPolicy:
 
     async def check(self, url: str) -> None:
         """Raise `robots_disallowed` unless we may fetch `url`."""
-        if self.is_allowlisted(url):
-            return
         rules = await self.rules_for(url)
         if not rules.can_fetch(url):
             raise CrawlerError(
@@ -156,8 +144,6 @@ class RobotsPolicy:
             )
 
     async def crawl_delay(self, url: str) -> float | None:
-        if self.is_allowlisted(url):
-            return None
         return (await self.rules_for(url)).crawl_delay()
 
     async def _load(self, origin: str) -> tuple[RobotsRules, float]:

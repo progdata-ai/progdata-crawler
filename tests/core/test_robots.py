@@ -96,16 +96,6 @@ async def test_empty_robots_allows_everything() -> None:
     await policy.check("https://example.com/private/page")
 
 
-async def test_allowlisted_domains_and_subdomains_skip_robots() -> None:
-    fetcher = FakeFetcher({})
-    policy = RobotsPolicy(fetcher, allowlist=["Example.com."])
-    await policy.check("https://example.com/no-crawlers/page")
-    await policy.check("https://docs.example.com/no-crawlers/page")
-    assert await policy.crawl_delay("https://example.com/") is None
-    assert fetcher.requests == []
-    assert not policy.is_allowlisted("https://notexample.com/")
-
-
 async def test_fetches_once_per_origin_even_when_concurrent() -> None:
     fetcher = FakeFetcher(
         {
