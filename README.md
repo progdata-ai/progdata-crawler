@@ -182,8 +182,9 @@ Set with environment variables, or in a `.env` file in the working directory.
 | `PDC_RETENTION_DAYS` | 7 | Cached pages and finished jobs older than this are deleted |
 | `PDC_MAX_CONCURRENT_JOBS` | 2 | Jobs (harvest, bulk) that run at the same time |
 | `PDC_BULK_CONCURRENCY` | 8 | Pages bulk jobs fetch at the same time, across all bulk jobs |
-| `PDC_SEARCH_PROVIDER` | `brave` | The search provider for find |
+| `PDC_SEARCH_PROVIDER` | `brave` | The search provider for find: `brave` or `searxng` |
 | `PDC_BRAVE_API_KEY` | unset | Key for the [Brave Search API](https://brave.com/search/api/), the default search provider |
+| `PDC_SEARXNG_URL` | unset | Address of a SearXNG instance you run, for `PDC_SEARCH_PROVIDER=searxng` |
 | `PDC_WEBHOOK_SECRET` | unset | Key that signs webhooks to `notify_url`. Jobs with a `notify_url` are refused while unset |
 | `PDC_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR` |
 | `PDC_LOG_FORMAT` | `text` | `text` or `json` (one object per line) |

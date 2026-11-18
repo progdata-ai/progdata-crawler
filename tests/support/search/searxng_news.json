@@ -1,0 +1,12 @@
+{
+  "query": "sourdough",
+  "results": [
+    {
+      "url": "https://news.example/sourdough-boom",
+      "title": "Bakeries report a sourdough boom",
+      "content": "Sales are up this autumn.",
+      "category": "news",
+      "publishedDate": "2026-11-16T10:00:00"
+    }
+  ]
+}

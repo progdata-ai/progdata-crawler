@@ -1,0 +1,13 @@
+{
+  "query": "sourdough",
+  "results": [
+    {
+      "url": "https://bakery.example/starter",
+      "title": "A jar of starter",
+      "content": "",
+      "category": "images",
+      "img_src": "https://img.bakery.example/jar.jpg",
+      "thumbnail_src": "https://thumbs.example/jar.jpg"
+    }
+  ]
+}

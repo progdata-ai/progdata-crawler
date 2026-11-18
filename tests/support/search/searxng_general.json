@@ -1,0 +1,32 @@
+{
+  "query": "sourdough starter",
+  "number_of_results": 0,
+  "results": [
+    {
+      "url": "https://bakery.example/starter",
+      "title": "How to keep a sourdough starter alive",
+      "content": "Feed it flour &amp; water every day.",
+      "engine": "example",
+      "category": "general",
+      "publishedDate": null
+    },
+    {
+      "url": "https://bakery.example/starter",
+      "title": "Same page from another engine",
+      "content": "Duplicate.",
+      "engine": "other",
+      "category": "general"
+    },
+    {
+      "url": "https://flour.example/rye",
+      "title": "Rye starters",
+      "content": "Rye ferments faster than <b>wheat</b>.",
+      "engine": "example",
+      "category": "general",
+      "publishedDate": "2026-09-01T00:00:00"
+    },
+    {"title": "No URL"}
+  ],
+  "answers": [],
+  "suggestions": []
+}

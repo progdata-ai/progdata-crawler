@@ -5,6 +5,7 @@ import asyncio
 from progdata_crawler.core.fetch.guard import AddressGuard
 from progdata_crawler.core.find.brave import BraveSearch
 from progdata_crawler.core.find.provider import SearchProvider
+from progdata_crawler.core.find.searxng import SearxngSearch
 from progdata_crawler.core.urls import UrlDeduplicator
 from progdata_crawler.models.find import FindRequest, FindResult, SearchHit, SearchSource
 from progdata_crawler.settings import SearchProviderName, Settings
@@ -21,6 +22,8 @@ def create_provider(settings: Settings) -> SearchProvider:
                 user_agent=settings.user_agent,
                 guard=guard,
             )
+        case SearchProviderName.SEARXNG:
+            return SearxngSearch(settings.searxng_url, user_agent=settings.user_agent)
 
 
 async def search(provider: SearchProvider, request: FindRequest) -> FindResult:

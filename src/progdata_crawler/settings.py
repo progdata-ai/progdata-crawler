@@ -40,6 +40,8 @@ class LogFormat(StrEnum):
 class SearchProviderName(StrEnum):
     BRAVE = "brave"
     """The Brave Search API. Needs `PDC_BRAVE_API_KEY`."""
+    SEARXNG = "searxng"
+    """A SearXNG instance you run. Needs `PDC_SEARXNG_URL`."""
 
 
 class Settings(BaseSettings):
@@ -85,6 +87,8 @@ class Settings(BaseSettings):
     """Which search provider find uses."""
     brave_api_key: SecretStr | None = None
     """Key for the Brave Search API."""
+    searxng_url: str | None = None
+    """Address of a SearXNG instance, for example http://localhost:8888."""
     log_level: LogLevel = LogLevel.INFO
     log_format: LogFormat = LogFormat.TEXT
 
