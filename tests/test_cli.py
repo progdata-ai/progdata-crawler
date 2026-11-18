@@ -121,3 +121,25 @@ def test_network_defaults_per_entry_point() -> None:
     assert _shared(unset).allow_private_networks is False
     explicit = Settings(allow_private_networks=False)
     assert _local(explicit).allow_private_networks is False
+
+
+@pytest.mark.usefixtures("cli_env")
+def test_discover_prints_urls(test_site: SiteServer) -> None:
+    test_site.add("/robots.txt", "User-agent: *\nDisallow: /private/\n", content_type="text/plain")
+    result = runner.invoke(
+        app, ["discover", test_site.url("/"), "--include-path", "^/docs/", "--no-links"]
+    )
+    assert result.exit_code == 0, result.output
+    lines = result.stdout.splitlines()
+    assert test_site.url("/docs/faq.html") in lines
+    assert all("/docs/" in line for line in lines)
+
+
+@pytest.mark.usefixtures("cli_env")
+def test_discover_json(test_site: SiteServer) -> None:
+    test_site.add("/robots.txt", "User-agent: *\n", content_type="text/plain")
+    result = runner.invoke(app, ["discover", test_site.url("/"), "--limit", "2", "--json"])
+    assert result.exit_code == 0, result.output
+    body = json.loads(result.stdout)
+    assert len(body["data"]["urls"]) == 2
+    assert body["data"]["truncated"] is True

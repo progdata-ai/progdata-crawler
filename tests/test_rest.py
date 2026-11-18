@@ -107,3 +107,23 @@ def test_internal_addresses_are_refused_when_protected(
         response = protected.post("/v1/fetch", json={"url": test_site.url("/")})
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "address_not_allowed"
+
+
+def test_discover(client: TestClient, test_site: SiteServer) -> None:
+    response = client.post(
+        "/v1/discover", json={"url": test_site.url("/"), "paths": {"include": ["^/docs/"]}}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["error"] is None
+    urls = [item["url"] for item in body["data"]["urls"]]
+    assert test_site.url("/docs/faq.html") in urls
+    assert all("/docs/" in url for url in urls)
+
+
+def test_discover_invalid_regex(client: TestClient, test_site: SiteServer) -> None:
+    response = client.post(
+        "/v1/discover", json={"url": test_site.url("/"), "paths": {"include": ["("]}}
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_request"
