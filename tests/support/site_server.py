@@ -223,9 +223,9 @@ class _QuietServer(ThreadingHTTPServer):
 
 
 @contextmanager
-def run_site() -> Generator[SiteServer]:
-    """Start the test site on a free port on 127.0.0.1 and stop it afterwards."""
-    server = _QuietServer(("127.0.0.1", 0), _Handler)
+def run_site(host: str = "127.0.0.1") -> Generator[SiteServer]:
+    """Start the test site on a free port on `host` and stop it afterwards."""
+    server = _QuietServer((host, 0), _Handler)
     server.daemon_threads = True
     site = SiteServer(server)
     handler = type("SiteHandler", (_Handler,), {"site": site})

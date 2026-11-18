@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     """Cached pages and finished jobs older than this are deleted automatically."""
     max_concurrent_jobs: int = Field(default=2, ge=1, le=32)
     """Jobs (harvest, bulk) that run at the same time."""
+    bulk_concurrency: int = Field(default=8, ge=1, le=64)
+    """Pages that bulk jobs fetch at the same time, across all bulk jobs. The per-domain
+    rate limit still spaces out requests to the same site."""
     log_level: LogLevel = LogLevel.INFO
     log_format: LogFormat = LogFormat.TEXT
 
