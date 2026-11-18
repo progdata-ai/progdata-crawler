@@ -72,6 +72,9 @@ class JobResult(BaseModel):
 
 MAX_RESULTS_PER_REQUEST = 1_000
 
+MAX_JOB_WAIT_S = 300
+"""Longest an entry point waits for a new job to finish before answering."""
+
 
 class JobView(BaseModel):
     """A job's status and one page of its results."""

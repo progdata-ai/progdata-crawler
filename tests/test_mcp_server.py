@@ -40,7 +40,14 @@ async def call(
 async def test_lists_the_fetch_tool(tmp_path: Path, test_site: SiteServer) -> None:
     async with connect(tmp_path, test_site) as client:
         tools = (await client.list_tools()).tools
-    assert [tool.name for tool in tools] == ["pdc_fetch", "pdc_query"]
+    assert [tool.name for tool in tools] == [
+        "pdc_fetch",
+        "pdc_query",
+        "pdc_discover",
+        "pdc_harvest",
+        "pdc_bulk",
+        "pdc_job",
+    ]
     tool = tools[0]
     assert tool.annotations is not None and tool.annotations.read_only_hint is True
     assert tool.input_schema["required"] == ["url"]

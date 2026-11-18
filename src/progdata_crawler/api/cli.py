@@ -1,6 +1,8 @@
 """Command-line interface: `progdata-crawler`, also installed as `pdc`."""
 
 import asyncio
+import sys
+from pathlib import Path
 from typing import Annotated, Any
 
 import typer
@@ -10,15 +12,25 @@ from progdata_crawler import __version__
 from progdata_crawler.core.crawler import Crawler
 from progdata_crawler.core.discover import discover_envelope
 from progdata_crawler.core.envelopes import enveloped
+from progdata_crawler.core.jobs.events import job_events
+from progdata_crawler.core.jobs.handlers import job_handlers
+from progdata_crawler.core.jobs.manager import JobManager
 from progdata_crawler.core.store.query import query_pages
 from progdata_crawler.log import configure_logging
 from progdata_crawler.models import (
+    BulkRequest,
     ContentMode,
     Device,
     DiscoverRequest,
     DiscoverResult,
     Envelope,
     FetchRequest,
+    HarvestRequest,
+    Job,
+    JobKind,
+    JobResult,
+    JobStatus,
+    JobView,
     Output,
     Page,
     QueryRequest,
@@ -224,6 +236,196 @@ def discover(
 async def _discover(settings: Settings, request: DiscoverRequest) -> Envelope[DiscoverResult]:
     async with Crawler(settings) as crawler:
         return await discover_envelope(crawler, request)
+
+
+OutputOption = Annotated[
+    list[Output] | None,
+    typer.Option(
+        "--output", "-o", help="Output per page. Repeatable. Default: markdown, metadata."
+    ),
+]
+JsonLinesOption = Annotated[
+    bool, typer.Option("--json", help="Print each result as one line of JSON.")
+]
+
+
+def _page_options(
+    output: list[Output] | None, content: ContentMode, render: RenderMode, no_store: bool
+) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "content": content,
+        "render": render,
+        "retain": Retention.NONE if no_store else Retention.DEFAULT,
+    }
+    if output:
+        fields["outputs"] = output
+    return fields
+
+
+def _print_result(result: JobResult, *, as_json: bool) -> None:
+    if as_json:
+        typer.echo(result.model_dump_json(exclude_none=True))
+    elif result.error is not None:
+        typer.echo(f"✗ {result.url}  {result.error.code.value}: {result.error.message}")
+    else:
+        title = result.page.metadata.title if result.page and result.page.metadata else None
+        typer.echo(f"✓ {result.url}" + (f"  {title}" if title else ""))
+
+
+async def _run_job(
+    settings: Settings, kind: JobKind, request: HarvestRequest | BulkRequest, *, as_json: bool
+) -> Job:
+    """Run a job in this process, print each result as it finishes, and return the end
+    state. Interrupting the command interrupts the job."""
+    async with (
+        Crawler(settings) as crawler,
+        JobManager(settings, job_handlers(crawler), page_store=crawler.store) as jobs,
+    ):
+        submitted = await jobs.submit(kind, request.model_dump(mode="json"), retain=request.retain)
+        typer.echo(f"Job {submitted.id}", err=True)
+        async for event in job_events(jobs, submitted.id):
+            if event.result is not None:
+                _print_result(event.result, as_json=as_json)
+        return await jobs.view_job(submitted.id)
+
+
+def _finish(job: Job) -> None:
+    summary = f"{job.status.value}: {job.progress.done} pages, {job.progress.failed} failed"
+    typer.echo(summary, err=True)
+    if job.error is not None:
+        typer.echo(f"Error ({job.error.code.value}): {job.error.message}", err=True)
+    if job.status is not JobStatus.SUCCEEDED:
+        raise typer.Exit(1)
+
+
+def _invalid_options(error: ValidationError) -> typer.Exit:
+    first = error.errors()[0]
+    location = ".".join(str(part) for part in first["loc"])
+    typer.echo(f"Invalid options: {location}: {first['msg']}", err=True)
+    return typer.Exit(2)
+
+
+@app.command()
+def harvest(
+    url: Annotated[str, typer.Argument(help="The start page.")],
+    max_pages: Annotated[int, typer.Option(help="Most pages to fetch.")] = 100,
+    max_depth: Annotated[int, typer.Option(help="Most links to follow from the start.")] = 3,
+    include_path: Annotated[
+        list[str] | None, typer.Option(help="Regex a URL path must match. Repeatable.")
+    ] = None,
+    exclude_path: Annotated[
+        list[str] | None, typer.Option(help="Regex of URL paths to leave out. Repeatable.")
+    ] = None,
+    scope: Annotated[Scope, typer.Option(help="How far from the start host to go.")] = Scope.SITE,
+    sitemaps: Annotated[
+        bool, typer.Option("--sitemaps/--no-sitemaps", help="Also start from the sitemaps.")
+    ] = True,
+    output: OutputOption = None,
+    content: Annotated[ContentMode, typer.Option(help="Main content or whole page.")] = (
+        ContentMode.MAIN
+    ),
+    render: Annotated[RenderMode, typer.Option(help="When to use a browser.")] = RenderMode.AUTO,
+    no_store: Annotated[
+        bool, typer.Option("--no-store", help="Store nothing once read (retain=none).")
+    ] = False,
+    as_json: JsonLinesOption = False,
+) -> None:
+    """Crawl a site breadth first, printing each page as it finishes."""
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_format)
+    try:
+        request = HarvestRequest.model_validate(
+            {
+                "url": url,
+                "max_pages": max_pages,
+                "max_depth": max_depth,
+                "paths": {"include": include_path or [], "exclude": exclude_path or []},
+                "scope": scope,
+                "sitemaps": sitemaps,
+                **_page_options(output, content, render, no_store),
+            }
+        )
+    except ValidationError as error:
+        raise _invalid_options(error) from error
+    _finish(asyncio.run(_run_job(_local(settings), JobKind.HARVEST, request, as_json=as_json)))
+
+
+@app.command()
+def bulk(
+    urls: Annotated[list[str] | None, typer.Argument(help="URLs to fetch.")] = None,
+    file: Annotated[
+        Path | None, typer.Option("--file", "-f", help="File with one URL per line; - for stdin.")
+    ] = None,
+    output: OutputOption = None,
+    content: Annotated[ContentMode, typer.Option(help="Main content or whole page.")] = (
+        ContentMode.MAIN
+    ),
+    render: Annotated[RenderMode, typer.Option(help="When to use a browser.")] = RenderMode.AUTO,
+    no_store: Annotated[
+        bool, typer.Option("--no-store", help="Store nothing once read (retain=none).")
+    ] = False,
+    as_json: JsonLinesOption = False,
+) -> None:
+    """Fetch many URLs in parallel, printing each page as it finishes."""
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_format)
+    all_urls = list(urls or [])
+    if file is not None:
+        text = sys.stdin.read() if str(file) == "-" else file.read_text(encoding="utf-8")
+        all_urls += [line.strip() for line in text.splitlines() if line.strip()]
+    try:
+        request = BulkRequest.model_validate(
+            {"urls": all_urls, **_page_options(output, content, render, no_store)}
+        )
+    except ValidationError as error:
+        raise _invalid_options(error) from error
+    _finish(asyncio.run(_run_job(_local(settings), JobKind.BULK, request, as_json=as_json)))
+
+
+@app.command()
+def job(
+    job_id: Annotated[str, typer.Argument(help="The job id.")],
+    cursor: Annotated[int, typer.Option(help="Show results after this seq.")] = 0,
+    limit: Annotated[int, typer.Option(help="Most results to show.")] = 100,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print the full response envelope as JSON.")
+    ] = False,
+) -> None:
+    """Show a job from this machine's job table: status, progress and results."""
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_format)
+    envelope = asyncio.run(_job_view(settings, job_id, cursor=cursor, limit=limit))
+    if as_json:
+        typer.echo(envelope.model_dump_json(indent=2, exclude_none=True))
+    elif envelope.error is not None:
+        typer.echo(f"Error ({envelope.error.code.value}): {envelope.error.message}", err=True)
+    elif envelope.data is not None:
+        view = envelope.data
+        progress = view.job.progress
+        typer.echo(
+            f"{view.job.kind.value} {view.job.id}: {view.job.status.value}, "
+            f"{progress.done} pages, {progress.failed} failed",
+            err=True,
+        )
+        for result in view.results:
+            _print_result(result, as_json=False)
+        if not view.complete:
+            typer.echo(f"More: --cursor {view.next_cursor}", err=True)
+    if envelope.error is not None:
+        raise typer.Exit(1)
+
+
+async def _job_view(
+    settings: Settings, job_id: str, *, cursor: int, limit: int
+) -> Envelope[JobView]:
+    """Read the job table without running jobs: jobs left unfinished by another process
+    must not be marked as interrupted by merely looking at them."""
+    async with Crawler(settings) as crawler:
+        jobs = JobManager(settings, {}, page_store=crawler.store)
+        try:
+            return await enveloped(JobView, jobs.view(job_id, cursor=cursor, limit=limit))
+        finally:
+            await jobs.aclose()
 
 
 @app.command(name="query")

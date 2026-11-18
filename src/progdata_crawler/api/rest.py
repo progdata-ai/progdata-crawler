@@ -19,16 +19,19 @@ from progdata_crawler.core.discover import discover_envelope
 from progdata_crawler.core.envelopes import enveloped
 from progdata_crawler.core.errors import CrawlerError
 from progdata_crawler.core.jobs.events import job_events
+from progdata_crawler.core.jobs.handlers import job_handlers as default_job_handlers
 from progdata_crawler.core.jobs.manager import JobManager
 from progdata_crawler.core.jobs.queue import JobHandler
 from progdata_crawler.core.store.query import query_pages
 from progdata_crawler.models import (
+    BulkRequest,
     DiscoverRequest,
     DiscoverResult,
     Envelope,
     ErrorCode,
     ErrorInfo,
     FetchRequest,
+    HarvestRequest,
     Job,
     JobEvent,
     JobEventType,
@@ -39,7 +42,7 @@ from progdata_crawler.models import (
     QueryRequest,
     QueryResult,
 )
-from progdata_crawler.models.jobs import MAX_RESULTS_PER_REQUEST
+from progdata_crawler.models.jobs import MAX_JOB_WAIT_S, MAX_RESULTS_PER_REQUEST
 from progdata_crawler.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -112,7 +115,11 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         async with (
             Crawler(settings, store_path=store_path) as crawler,
-            JobManager(settings, job_handlers or {}, page_store=crawler.store) as jobs,
+            JobManager(
+                settings,
+                job_handlers if job_handlers is not None else default_job_handlers(crawler),
+                page_store=crawler.store,
+            ) as jobs,
         ):
             app.state.crawler = crawler
             app.state.jobs = jobs
@@ -187,6 +194,49 @@ def create_app(
     ) -> JSONResponse:
         crawler: Crawler = request.app.state.crawler
         return await _enveloped(QueryResult, query_pages(crawler.store, body), request)
+
+    wait_query = Query(
+        ge=0,
+        le=MAX_JOB_WAIT_S,
+        description="Seconds to wait for the job to finish before answering. With 0 the "
+        "job is returned right away; follow it with GET /v1/jobs/{id} or its events.",
+    )
+
+    @app.post(
+        "/v1/harvest",
+        response_model=Envelope[JobView],
+        responses=ERROR_RESPONSES,
+        summary="Crawl a site (job)",
+        description="Start a breadth-first crawl from `url` within the limits, as a job. "
+        "Returns the job and, when it finished within `wait_s`, its first results.",
+    )
+    async def harvest(  # pyright: ignore[reportUnusedFunction]
+        body: HarvestRequest,
+        request: Request,
+        wait_s: Annotated[float, wait_query] = 0,
+        limit: Annotated[int, Query(ge=1, le=MAX_RESULTS_PER_REQUEST)] = 100,
+    ) -> JSONResponse:
+        jobs: JobManager = request.app.state.jobs
+        operation = jobs.start_job(JobKind.HARVEST, body, wait_s=wait_s, limit=limit)
+        return await _enveloped(JobView, operation, request)
+
+    @app.post(
+        "/v1/bulk",
+        response_model=Envelope[JobView],
+        responses=ERROR_RESPONSES,
+        summary="Fetch many URLs (job)",
+        description="Fetch every URL in `urls` with the same page options, as a job. "
+        "Returns the job and, when it finished within `wait_s`, its first results.",
+    )
+    async def bulk(  # pyright: ignore[reportUnusedFunction]
+        body: BulkRequest,
+        request: Request,
+        wait_s: Annotated[float, wait_query] = 0,
+        limit: Annotated[int, Query(ge=1, le=MAX_RESULTS_PER_REQUEST)] = 100,
+    ) -> JSONResponse:
+        jobs: JobManager = request.app.state.jobs
+        operation = jobs.start_job(JobKind.BULK, body, wait_s=wait_s, limit=limit)
+        return await _enveloped(JobView, operation, request)
 
     @app.get(
         "/v1/jobs/{job_id}",

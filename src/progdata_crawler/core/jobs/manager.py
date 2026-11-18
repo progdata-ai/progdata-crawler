@@ -1,6 +1,7 @@
 """The job service: create, run, inspect and cancel jobs, and keep the tables tidy."""
 
 import asyncio
+import contextlib
 from collections.abc import Mapping
 from pathlib import Path
 from types import TracebackType
@@ -13,7 +14,9 @@ from progdata_crawler.core.jobs.notify import WebhookNotifier
 from progdata_crawler.core.jobs.queue import InProcessQueue, JobHandler
 from progdata_crawler.core.jobs.store import JobStore
 from progdata_crawler.core.store.sqlite import PageStore
+from progdata_crawler.models.bulk import BulkRequest
 from progdata_crawler.models.envelope import ErrorCode
+from progdata_crawler.models.harvest import HarvestRequest
 from progdata_crawler.models.jobs import Job, JobKind, JobResult, JobStatus, JobView
 from progdata_crawler.models.options import Retention
 from progdata_crawler.settings import Settings
@@ -114,6 +117,23 @@ class JobManager:
     async def cancel(self, job_id: str) -> Job | None:
         await self._queue.cancel(job_id)
         return await self.get(job_id)
+
+    async def start_job(
+        self,
+        kind: JobKind,
+        request: HarvestRequest | BulkRequest,
+        *,
+        wait_s: float = 0,
+        limit: int = 100,
+    ) -> JobView:
+        """Submit a job, wait up to `wait_s` for it to finish, and return its view: the
+        results right away for small jobs, or the running job to follow with `view`."""
+        job = await self.submit(kind, request.model_dump(mode="json"), retain=request.retain)
+        if wait_s > 0:
+            # Shielded: a timeout must stop the waiting, not the job.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(self.wait(job.id)), timeout=wait_s)
+        return await self.view(job.id, limit=limit)
 
     async def view(self, job_id: str, *, cursor: int = 0, limit: int = 100) -> JobView:
         """The job's status and its results after `cursor`. Raises `not_found`."""
