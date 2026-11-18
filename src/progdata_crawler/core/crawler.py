@@ -35,6 +35,7 @@ from progdata_crawler.core.fetch.detect import (
     should_render_after,
     should_render_first,
 )
+from progdata_crawler.core.fetch.guard import AddressGuard
 from progdata_crawler.core.fetch.http import HttpFetcher, raise_for_blocked
 from progdata_crawler.core.polite.ratelimit import BACKOFF_STATUSES, DomainRateLimiter
 from progdata_crawler.core.polite.robots import RobotsPolicy
@@ -118,11 +119,16 @@ class Crawler:
 
     def __init__(self, settings: Settings, *, store_path: Path | str | None = None) -> None:
         self.settings = settings
-        self._http = HttpFetcher(settings.user_agent, timeout_ms=settings.timeout_ms)
+        # Unset means protected: entry points that run on the user's own machine opt out.
+        self._guard = AddressGuard(allow_private=bool(settings.allow_private_networks))
+        self._http = HttpFetcher(
+            settings.user_agent, timeout_ms=settings.timeout_ms, guard=self._guard
+        )
         self._browser = BrowserPool(
             settings.user_agent,
             max_pages=settings.browser_max_pages,
             executable_path=settings.browser_executable,
+            guard=self._guard,
         )
         self._robots = RobotsPolicy(self._http.fetch_robots, allowlist=settings.robots_allowlist)
         self._rate = DomainRateLimiter(min_interval_s=settings.rate_limit_interval_s)
@@ -166,6 +172,7 @@ class Crawler:
         return FetchOutcome(page, cached=False, rendered=source.rendered)
 
     async def _polite_wait(self, url: str, options: PageOptions) -> None:
+        await self._guard.check_url(url)
         await self._robots.check(url)
         await self._rate.acquire(
             url,

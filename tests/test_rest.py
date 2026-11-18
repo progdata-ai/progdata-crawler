@@ -97,3 +97,13 @@ def test_openapi_documents_fetch(client: TestClient) -> None:
 
 def test_healthz(client: TestClient) -> None:
     assert client.get("/healthz").json()["status"] == "ok"
+
+
+def test_internal_addresses_are_refused_when_protected(
+    tmp_path: Path, test_site: SiteServer
+) -> None:
+    settings = Settings(data_dir=tmp_path, allow_private_networks=False)
+    with TestClient(create_app(settings, store_path=":memory:")) as protected:
+        response = protected.post("/v1/fetch", json={"url": test_site.url("/")})
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "address_not_allowed"

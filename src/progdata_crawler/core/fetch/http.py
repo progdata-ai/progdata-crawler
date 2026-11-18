@@ -15,6 +15,7 @@ from typing import Self
 import httpx
 
 from progdata_crawler.core.errors import CrawlerError
+from progdata_crawler.core.fetch.guard import AddressGuard, GuardedTransport
 from progdata_crawler.core.polite.robots import RobotsFile
 from progdata_crawler.models.envelope import ErrorCode
 
@@ -87,12 +88,20 @@ class HttpFetcher:
         timeout_ms: int = 30_000,
         max_bytes: int = DEFAULT_MAX_BYTES,
         transport: httpx.AsyncBaseTransport | None = None,
+        guard: AddressGuard | None = None,
     ) -> None:
+        """With a `guard` that does not allow private networks, every connection,
+        including each redirect, is checked against internal addresses."""
         self._timeout_ms = timeout_ms
         self._max_bytes = max_bytes
+        guarded = guard is not None and not guard.allow_private
+        if guarded and transport is None:
+            assert guard is not None
+            transport = GuardedTransport(guard)
         self._client = httpx.AsyncClient(
             http2=transport is None,
             transport=transport,
+            trust_env=not guarded,
             follow_redirects=True,
             max_redirects=MAX_REDIRECTS,
             headers={"User-Agent": user_agent},
