@@ -30,6 +30,8 @@ from progdata_crawler.core.jobs.manager import JobManager
 from progdata_crawler.core.jobs.queue import JobHandler
 from progdata_crawler.core.session.browser_session import SessionManager
 from progdata_crawler.core.store.query import query_pages
+from progdata_crawler.core.structure.llm import Llm
+from progdata_crawler.core.structure.service import structure
 from progdata_crawler.models import (
     BulkRequest,
     ConvertRequest,
@@ -57,6 +59,7 @@ from progdata_crawler.models import (
     SessionView,
 )
 from progdata_crawler.models.jobs import MAX_JOB_WAIT_S, MAX_RESULTS_PER_REQUEST
+from progdata_crawler.models.structure_request import StructureRequest, StructureResult
 from progdata_crawler.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -138,13 +141,14 @@ def create_app(
     store_path: str | None = None,
     job_handlers: Mapping[JobKind, JobHandler] | None = None,
     search_provider: SearchProvider | None = None,
+    llm: Llm | None = None,
 ) -> FastAPI:
     """Build the REST app. The crawler and the job service start and stop with the app."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         async with (
-            Crawler(settings, store_path=store_path) as crawler,
+            Crawler(settings, store_path=store_path, llm=llm) as crawler,
             JobManager(
                 settings,
                 job_handlers if job_handlers is not None else default_job_handlers(crawler),
@@ -169,6 +173,13 @@ def create_app(
         version=__version__,
         description="Fetch, crawl, search and structure web content for LLMs and agents.",
         lifespan=lifespan,
+    )
+
+    wait_query = Query(
+        ge=0,
+        le=MAX_JOB_WAIT_S,
+        description="Seconds to wait for the job to finish before answering. With 0 the "
+        "job is returned right away; follow it with GET /v1/jobs/{id} or its events.",
     )
 
     @app.exception_handler(RequestValidationError)
@@ -315,6 +326,29 @@ def create_app(
         return await _enveloped(SessionView, sessions.close(session_id), request)
 
     @app.post(
+        "/v1/structure",
+        response_model=Envelope[StructureResult],
+        responses={
+            **ERROR_RESPONSES,
+            503: {"model": Envelope[Page], "description": "llm_unavailable"},
+        },
+        summary="Extract structured data",
+        description="Extract data that fits `structure.schema` from each URL with the LLM. "
+        "One URL is answered directly with `data`. Several URLs run as a job (`job`), "
+        "followed like bulk; each result's page has `structured` or `output_errors`.",
+    )
+    async def structure_endpoint(  # pyright: ignore[reportUnusedFunction]
+        body: StructureRequest,
+        request: Request,
+        wait_s: Annotated[float, wait_query] = 0,
+        limit: Annotated[int, Query(ge=1, le=MAX_RESULTS_PER_REQUEST)] = 100,
+    ) -> JSONResponse:
+        crawler: Crawler = request.app.state.crawler
+        jobs: JobManager = request.app.state.jobs
+        operation = structure(crawler, jobs, body, wait_s=wait_s, limit=limit)
+        return await _enveloped(StructureResult, operation, request)
+
+    @app.post(
         "/v1/query",
         response_model=Envelope[QueryResult],
         responses=ERROR_RESPONSES,
@@ -327,13 +361,6 @@ def create_app(
     ) -> JSONResponse:
         crawler: Crawler = request.app.state.crawler
         return await _enveloped(QueryResult, query_pages(crawler.store, body), request)
-
-    wait_query = Query(
-        ge=0,
-        le=MAX_JOB_WAIT_S,
-        description="Seconds to wait for the job to finish before answering. With 0 the "
-        "job is returned right away; follow it with GET /v1/jobs/{id} or its events.",
-    )
 
     @app.post(
         "/v1/harvest",

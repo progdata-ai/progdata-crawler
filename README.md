@@ -131,6 +131,7 @@ curl -s http://127.0.0.1:8000/v1/fetch \
 | `POST /v1/session` | Open a browser session |
 | `POST /v1/session/{id}/step` | Run steps in the session and get the page back |
 | `DELETE /v1/session/{id}` | Close a session |
+| `POST /v1/structure?wait_s=` | Extract data against a JSON Schema: one URL directly, several as a job |
 | `POST /v1/query` | Search pages fetched before |
 
 Harvest and bulk answer with the job right away, or after up to `wait_s` seconds with its first results. Read all results by passing `next_cursor` back as `cursor` until `complete` is true.
