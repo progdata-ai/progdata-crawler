@@ -161,6 +161,7 @@ Each request carries `X-PDC-Timestamp` (Unix seconds) and `X-PDC-Signature: sha2
 ```python
 import hashlib, hmac, time
 
+
 def valid(secret: bytes, timestamp: str, body: bytes, signature: str) -> bool:
     if abs(time.time() - int(timestamp)) > 300:
         return False

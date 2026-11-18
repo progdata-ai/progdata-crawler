@@ -84,3 +84,24 @@ class JobView(BaseModel):
     """Pass as `cursor` to get the results after these."""
     complete: bool
     """True when the job has finished and every result has been returned."""
+
+
+class JobEventType(StrEnum):
+    JOB = "job"
+    """The job's status or progress changed. Also the first event of every stream."""
+    RESULT = "result"
+    """A page finished."""
+    KEEP_ALIVE = "keep_alive"
+    """Nothing happened for a while; keeps proxies from closing the connection."""
+
+
+class JobEvent(BaseModel):
+    """One event in a job's event stream."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    """The `seq` of the last result sent so far. Resume from here after a disconnect."""
+    type: JobEventType
+    job: Job | None = None
+    result: JobResult | None = None

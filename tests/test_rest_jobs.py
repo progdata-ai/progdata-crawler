@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -133,3 +134,43 @@ def test_invalid_limit(client: TestClient) -> None:
     response = client.get("/v1/jobs/any", params={"limit": 0})
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "invalid_request"
+
+
+def parse_sse(text: str) -> list[dict[str, str]]:
+    events: list[dict[str, str]] = []
+    for block in text.split("\n\n"):
+        fields = dict(
+            line.split(": ", 1) for line in block.splitlines() if line and not line.startswith(":")
+        )
+        if fields:
+            events.append(fields)
+    return events
+
+
+def test_event_stream(client: TestClient) -> None:
+    job_id = submit(client, JobKind.BULK)
+    with client.stream("GET", f"/v1/jobs/{job_id}/events") as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        events = parse_sse(response.read().decode())
+
+    assert events[0]["event"] == "job"
+    results = [event for event in events if event["event"] == "result"]
+    assert [int(event["id"]) for event in results] == list(range(1, PAGES + 1))
+    assert [json.loads(event["data"])["seq"] for event in results] == list(range(1, PAGES + 1))
+    assert json.loads(events[-1]["data"])["status"] == "succeeded"
+
+
+def test_event_stream_resumes_with_last_event_id(client: TestClient) -> None:
+    job_id = submit(client, JobKind.BULK)
+    wait(client, job_id)
+    response = client.get(f"/v1/jobs/{job_id}/events", headers={"Last-Event-ID": "20"})
+    events = parse_sse(response.text)
+    assert events[0]["event"] == "job" and events[0]["id"] == "20"
+    assert [int(event["id"]) for event in events[1:]] == list(range(21, PAGES + 1))
+
+
+def test_event_stream_of_unknown_job(client: TestClient) -> None:
+    response = client.get("/v1/jobs/nope/events")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
