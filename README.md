@@ -158,6 +158,21 @@ The same options work in the CLI, the MCP tool and the REST API.
 | `cache_ttl` | 86 400 | Maximum age of a cached result in seconds; 0 always fetches fresh |
 | `full_page_screenshot` | false | Capture the whole page instead of the visible part |
 | `retain` | `default` | `none` stores nothing after the response |
+| `steps` | none | Browser steps after load: `click`, `type`, `press`, `scroll`, `wait`, `capture` (see below) |
+
+### Browser steps
+
+`steps` lets you use a page before it is captured, for example to fill in a search form:
+
+```json
+{"url": "https://example.com/search", "steps": [
+  {"action": "type", "selector": "#q", "text": "sourdough"},
+  {"action": "press", "key": "Enter"},
+  {"action": "wait", "selector": ".results"}
+]}
+```
+
+A `capture` step records the page at that point in `captures`. A step whose element is not found within its `timeout_ms` (default 5 000) gives `step_failed`, naming the step. Every page the browser goes to because of a step (a link, a form, a redirect) is checked against robots.txt and the rate limit like any other request. Pages with steps always use the browser and are never cached.
 
 ## Errors
 
@@ -173,6 +188,7 @@ The same options work in the CLI, the MCP tool and the REST API.
 | `unsupported_type` | 415 | Neither an HTML page nor a PDF, DOCX or XLSX document, a damaged document, or larger than 10 MB |
 | `llm_unavailable` | 503 | The LLM is not configured, refused the request or did not answer in time |
 | `search_unavailable` | 503 | Web search is not configured (no API key), or the search provider failed |
+| `step_failed` | 422 | A browser step could not be done, for example because its element was not found |
 | `not_found` | 404 | No job with this id, or it has been deleted |
 | `internal_error` | 500 | Something went wrong on our side |
 

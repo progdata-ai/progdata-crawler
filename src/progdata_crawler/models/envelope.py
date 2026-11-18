@@ -29,6 +29,8 @@ class ErrorCode(StrEnum):
     """Web search is not configured, or the search provider failed."""
     LLM_UNAVAILABLE = "llm_unavailable"
     """The LLM is not configured, refused the request or failed to answer in time."""
+    STEP_FAILED = "step_failed"
+    """A browser step could not be done, for example because its element was not found."""
     NOT_FOUND = "not_found"
     """The job or other resource does not exist, or no longer exists."""
     QUOTA_EXCEEDED = "quota_exceeded"
@@ -53,6 +55,7 @@ _HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.UNSUPPORTED_TYPE: 415,
     ErrorCode.SEARCH_UNAVAILABLE: 503,
     ErrorCode.LLM_UNAVAILABLE: 503,
+    ErrorCode.STEP_FAILED: 422,
     ErrorCode.NOT_FOUND: 404,
     ErrorCode.QUOTA_EXCEEDED: 429,
     ErrorCode.INTERNAL_ERROR: 500,
