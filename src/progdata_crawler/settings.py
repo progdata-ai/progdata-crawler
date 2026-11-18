@@ -126,6 +126,12 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
+    def watch_db_path(self) -> Path:
+        """The SQLite database for watches and their versions."""
+        return self.data_dir / "watch.sqlite3"
+
+    @computed_field
+    @property
     def cache_db_path(self) -> Path:
         """The SQLite database for the page cache and full-text index."""
         return self.data_dir / "cache.sqlite3"

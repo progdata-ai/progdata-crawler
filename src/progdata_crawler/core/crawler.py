@@ -62,6 +62,7 @@ from progdata_crawler.core.store.cache import PageCache
 from progdata_crawler.core.store.sqlite import PageStore
 from progdata_crawler.core.structure.extract import extract
 from progdata_crawler.core.structure.llm import Llm, create_llm
+from progdata_crawler.core.watch.diff import diff_text
 from progdata_crawler.models.convert import ConvertResult
 from progdata_crawler.models.envelope import Envelope, ErrorCode, ErrorInfo, Meta
 from progdata_crawler.models.fetch import FetchRequest
@@ -75,7 +76,7 @@ log = logging.getLogger(__name__)
 PAGE_TYPES = HTML_TYPES | DOCUMENT_TYPES | GENERIC_TYPES
 """What fetch accepts: HTML pages, and documents it converts to markdown."""
 
-NOT_YET_AVAILABLE = frozenset({Output.DIFF})
+NOT_YET_AVAILABLE: frozenset[Output] = frozenset()
 """Outputs that later phases add."""
 
 
@@ -249,7 +250,8 @@ class Crawler:
         # Steps can change things on the site (a form sent), so their pages are never
         # served from or stored in the cache.
         cacheable = not options.steps
-        if cacheable:
+        # A diff compares with the last stored version, so it always needs a fresh copy.
+        if cacheable and Output.DIFF not in options.outputs:
             cached = await self._cache.get(url, options)
             if cached is not None:
                 return FetchOutcome(cached.page, cached=True, rendered=cached.rendered)
@@ -258,11 +260,23 @@ class Crawler:
         page = await asyncio.to_thread(build_page, source, options)
         if Output.SUMMARY in options.outputs or Output.STRUCTURED in options.outputs:
             page = await self._add_llm_outputs(page, source, options)
+        if Output.DIFF in options.outputs:
+            page = await self._add_diff(page, source, options)
         # A page with a missing output is not cached, so the next request tries again
         # (for example once an LLM is configured).
         if cacheable and not page.output_errors:
             await self._cache.put(url, options, page, rendered=source.rendered)
         return FetchOutcome(page, cached=False, rendered=source.rendered)
+
+    async def _add_diff(self, page: Page, source: _Source, options: PageOptions) -> Page:
+        """`diff`: the markdown compared with the last stored version of the page. Empty
+        when nothing changed, None when no earlier version with markdown is stored."""
+        previous = await self._store.latest_page(page.url)
+        if previous is None or previous.markdown is None:
+            return page
+        markdown, _ = await self._text_for_llm(page, source, options)
+        change = await asyncio.to_thread(diff_text, previous.markdown, markdown, label=page.url)
+        return page.model_copy(update={"diff": change.text})
 
     def llm(self) -> Llm:
         """The configured LLM. Raises `llm_unavailable` when there is none."""

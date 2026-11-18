@@ -27,11 +27,13 @@ from progdata_crawler.core.find import SearchProvider, create_provider, find
 from progdata_crawler.core.jobs.events import job_events
 from progdata_crawler.core.jobs.handlers import job_handlers as default_job_handlers
 from progdata_crawler.core.jobs.manager import JobManager
+from progdata_crawler.core.jobs.notify import create_notifier
 from progdata_crawler.core.jobs.queue import JobHandler
 from progdata_crawler.core.session.browser_session import SessionManager
 from progdata_crawler.core.store.query import query_pages
 from progdata_crawler.core.structure.llm import Llm
 from progdata_crawler.core.structure.service import structure
+from progdata_crawler.core.watch.scheduler import WatchService
 from progdata_crawler.models import (
     BulkRequest,
     ConvertRequest,
@@ -60,6 +62,7 @@ from progdata_crawler.models import (
 )
 from progdata_crawler.models.jobs import MAX_JOB_WAIT_S, MAX_RESULTS_PER_REQUEST
 from progdata_crawler.models.structure_request import StructureRequest, StructureResult
+from progdata_crawler.models.watch import Watch, WatchCheck, WatchCreate, WatchList
 from progdata_crawler.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -155,7 +158,9 @@ def create_app(
                 page_store=crawler.store,
             ) as jobs,
             SessionManager(crawler) as sessions,
+            WatchService(crawler, create_notifier(settings)) as watches,
         ):
+            app.state.watches = watches
             app.state.crawler = crawler
             app.state.jobs = jobs
             app.state.sessions = sessions
@@ -347,6 +352,61 @@ def create_app(
         jobs: JobManager = request.app.state.jobs
         operation = structure(crawler, jobs, body, wait_s=wait_s, limit=limit)
         return await _enveloped(StructureResult, operation, request)
+
+    @app.post(
+        "/v1/watch",
+        response_model=Envelope[Watch],
+        responses=ERROR_RESPONSES,
+        summary="Watch a page",
+        description="Fetch `url` every `interval_s` seconds (at least 300) and compare it with "
+        "the last version. A change is sent to `notify_url` as a signed webhook with a diff. "
+        "The first check runs right away.",
+    )
+    async def add_watch(  # pyright: ignore[reportUnusedFunction]
+        body: WatchCreate, request: Request
+    ) -> JSONResponse:
+        watches: WatchService = request.app.state.watches
+        return await _enveloped(Watch, watches.add(body), request)
+
+    @app.get("/v1/watch", response_model=Envelope[WatchList], summary="List watches")
+    async def list_watches(request: Request) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
+        watches: WatchService = request.app.state.watches
+
+        async def listing() -> WatchList:
+            return WatchList(watches=tuple(await watches.all()))
+
+        return await _enveloped(WatchList, listing(), request)
+
+    @app.get(
+        "/v1/watch/{watch_id}",
+        response_model=Envelope[Watch],
+        responses=ERROR_RESPONSES,
+        summary="A watch and its last check",
+    )
+    async def get_watch(watch_id: str, request: Request) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
+        watches: WatchService = request.app.state.watches
+        return await _enveloped(Watch, watches.get(watch_id), request)
+
+    @app.post(
+        "/v1/watch/{watch_id}/check",
+        response_model=Envelope[WatchCheck],
+        responses=ERROR_RESPONSES,
+        summary="Check a watch now",
+    )
+    async def check_watch(watch_id: str, request: Request) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
+        watches: WatchService = request.app.state.watches
+        return await _enveloped(WatchCheck, watches.check(watch_id), request)
+
+    @app.delete(
+        "/v1/watch/{watch_id}",
+        response_model=Envelope[Watch],
+        responses=ERROR_RESPONSES,
+        summary="Stop watching",
+        description="Removes the watch and every version it kept.",
+    )
+    async def remove_watch(watch_id: str, request: Request) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
+        watches: WatchService = request.app.state.watches
+        return await _enveloped(Watch, watches.remove(watch_id), request)
 
     @app.post(
         "/v1/query",

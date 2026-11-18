@@ -46,6 +46,7 @@ async def test_lists_the_fetch_tool(tmp_path: Path, test_site: SiteServer) -> No
         "pdc_find",
         "pdc_convert",
         "pdc_session",
+        "pdc_watch",
         "pdc_discover",
         "pdc_harvest",
         "pdc_structure",
@@ -152,3 +153,23 @@ async def test_session_tool(tmp_path: Path, test_site: SiteServer) -> None:
     assert closed["data"]["closed"] is True
     assert gone["error"]["code"] == "not_found"
     assert bad["error"]["code"] == "invalid_request"
+
+
+async def test_watch_tool(tmp_path: Path, test_site: SiteServer) -> None:
+    async with connect(tmp_path, test_site) as client:
+        added = await call(
+            client, {"action": "add", "url": test_site.url("/article.html")}, tool="pdc_watch"
+        )
+        watch_id = added["data"]["watch"]["id"]
+        checked = await call(client, {"action": "check", "watch_id": watch_id}, tool="pdc_watch")
+        listed = await call(client, {"action": "list"}, tool="pdc_watch")
+        removed = await call(client, {"action": "remove", "watch_id": watch_id}, tool="pdc_watch")
+        too_often = await call(
+            client,
+            {"action": "add", "url": test_site.url("/"), "interval_s": 10},
+            tool="pdc_watch",
+        )
+    assert checked["data"]["check"]["status"] in ("first", "unchanged")
+    assert [w["id"] for w in listed["data"]["watches"]] == [watch_id]
+    assert removed["data"]["watch"]["id"] == watch_id
+    assert too_often["error"]["code"] == "invalid_request"

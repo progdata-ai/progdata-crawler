@@ -203,3 +203,28 @@ def test_llm_check_without_configuration() -> None:
     assert result.exit_code == 1
     assert "llm_unavailable" in result.stderr
     assert "PDC_LLM_PROVIDER" in result.stderr
+
+
+@pytest.mark.usefixtures("cli_env")
+def test_watch_commands(test_site: SiteServer) -> None:
+    test_site.add("/robots.txt", "User-agent: *\n", content_type="text/plain")
+    url = test_site.add("/watched", "<html><body><main><p>Rye costs 50.</p></main></body></html>")
+    added = runner.invoke(app, ["watch", "add", url, "--every", "300"])
+    assert added.exit_code == 0, added.output
+    assert added.stdout.startswith("Watching ")
+    watch_id = added.stdout.splitlines()[0].split()[-1]
+    assert "first" in added.stdout
+
+    test_site.add("/watched", "<html><body><main><p>Rye costs 55.</p></main></body></html>")
+    checked = runner.invoke(app, ["watch", "check", watch_id])
+    assert checked.exit_code == 0, checked.output
+    assert "changed" in checked.stdout and "+Rye costs 55." in checked.stdout
+
+    listed = runner.invoke(app, ["watch", "list"])
+    assert watch_id in listed.stdout and "changed" in listed.stdout
+    nothing_due = runner.invoke(app, ["watch", "check"])
+    assert nothing_due.exit_code == 0
+
+    removed = runner.invoke(app, ["watch", "remove", watch_id])
+    assert removed.exit_code == 0
+    assert runner.invoke(app, ["watch", "remove", watch_id]).exit_code == 1

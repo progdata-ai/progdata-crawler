@@ -21,9 +21,11 @@ from progdata_crawler.core.envelopes import enveloped
 from progdata_crawler.core.find import SearchProvider, create_provider, find
 from progdata_crawler.core.jobs.handlers import job_handlers
 from progdata_crawler.core.jobs.manager import JobManager
+from progdata_crawler.core.jobs.notify import create_notifier
 from progdata_crawler.core.session.browser_session import SessionManager
 from progdata_crawler.core.store.query import query_pages
 from progdata_crawler.core.structure.service import structure as structure_data
+from progdata_crawler.core.watch.scheduler import WatchService
 from progdata_crawler.models import (
     DEFAULT_OUTPUTS,
     BulkRequest,
@@ -57,6 +59,7 @@ from progdata_crawler.models import (
 )
 from progdata_crawler.models.jobs import MAX_JOB_WAIT_S
 from progdata_crawler.models.structure_request import StructureRequest, StructureResult
+from progdata_crawler.models.watch import WatchCreate, WatchResult
 from progdata_crawler.settings import Settings
 
 INSTRUCTIONS = (
@@ -172,6 +175,21 @@ SESSION_DESCRIPTION = (
 )
 
 
+WATCH_DESCRIPTION = (
+    "Watch web pages for changes. action='add' with url (and interval_s, at least 300, "
+    "default 3600) starts watching and checks right away; action='list' shows the "
+    "watches; action='check' with watch_id checks now and returns the diff when the page "
+    "changed; action='remove' with watch_id stops watching and deletes its versions."
+)
+
+
+class WatchAction(StrEnum):
+    ADD = "add"
+    LIST = "list"
+    CHECK = "check"
+    REMOVE = "remove"
+
+
 class SessionAction(StrEnum):
     OPEN = "open"
     STEP = "step"
@@ -193,7 +211,9 @@ def create_server(
             Crawler(settings, store_path=store_path) as crawler,
             JobManager(settings, job_handlers(crawler), page_store=crawler.store) as jobs,
             SessionManager(crawler) as sessions,
+            WatchService(crawler, create_notifier(settings)) as watches,
         ):
+            running["watches"] = watches
             provider = search_provider or create_provider(
                 settings, robots=crawler.check_robots, store=crawler.store
             )
@@ -413,6 +433,45 @@ def create_server(
                     return await enveloped(SessionView, sessions.close(session_id or ""))
         except ValidationError as error:
             return _invalid(SessionView, error)
+
+    @server.tool(
+        name="pdc_watch",
+        title="Watch pages for changes",
+        description=WATCH_DESCRIPTION,
+        annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True),
+    )
+    async def pdc_watch(  # pyright: ignore[reportUnusedFunction]
+        action: Annotated[WatchAction, Field(description="add, list, check or remove.")],
+        url: Annotated[str | None, Field(description="For add: the page to watch.")] = None,
+        interval_s: Annotated[
+            int, Field(description="For add: seconds between checks (at least 300).")
+        ] = 3600,
+        watch_id: Annotated[
+            str | None, Field(description="For check and remove: the watch.")
+        ] = None,
+    ) -> Envelope[WatchResult]:
+        watches: WatchService = running["watches"]
+        request: WatchCreate | None = None
+        if action is WatchAction.ADD:
+            try:
+                request = WatchCreate.model_validate({"url": url, "interval_s": interval_s})
+            except ValidationError as error:
+                return _invalid(WatchResult, error)
+
+        async def act() -> WatchResult:
+            match action:
+                case WatchAction.ADD:
+                    assert request is not None
+                    watch = await watches.add(request)
+                    return WatchResult(watch=await watches.get(watch.id))
+                case WatchAction.LIST:
+                    return WatchResult(watches=tuple(await watches.all()))
+                case WatchAction.CHECK:
+                    return WatchResult(check=await watches.check(watch_id or ""))
+                case WatchAction.REMOVE:
+                    return WatchResult(watch=await watches.remove(watch_id or ""))
+
+        return await enveloped(WatchResult, act())
 
     @server.tool(
         name="pdc_discover",

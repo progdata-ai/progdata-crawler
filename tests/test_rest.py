@@ -190,3 +190,23 @@ def test_browser_session(client: TestClient, test_site: SiteServer) -> None:
     assert client.delete(f"/v1/session/{session_id}").json()["data"]["closed"] is True
     gone = client.delete(f"/v1/session/{session_id}")
     assert (gone.status_code, gone.json()["error"]["code"]) == (404, "not_found")
+
+
+def test_watch_endpoints(client: TestClient, test_site: SiteServer) -> None:
+    added = client.post(
+        "/v1/watch", json={"url": test_site.url("/article.html"), "interval_s": 600}
+    )
+    assert added.status_code == 200
+    watch_id = added.json()["data"]["id"]
+    check = client.post(f"/v1/watch/{watch_id}/check").json()["data"]
+    assert check["status"] in ("first", "unchanged")
+    listed = client.get("/v1/watch").json()["data"]["watches"]
+    assert [w["id"] for w in listed] == [watch_id]
+    assert client.get(f"/v1/watch/{watch_id}").json()["data"]["url"] == test_site.url(
+        "/article.html"
+    )
+    assert client.delete(f"/v1/watch/{watch_id}").status_code == 200
+    gone = client.get(f"/v1/watch/{watch_id}")
+    assert (gone.status_code, gone.json()["error"]["code"]) == (404, "not_found")
+    refused = client.post("/v1/watch", json={"url": test_site.url("/"), "retain": "none"})
+    assert refused.status_code == 422
