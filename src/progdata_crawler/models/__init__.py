@@ -8,7 +8,14 @@ from progdata_crawler.models.discover import (
 )
 from progdata_crawler.models.envelope import Envelope, ErrorCode, ErrorInfo, Meta
 from progdata_crawler.models.fetch import FetchRequest
-from progdata_crawler.models.jobs import Job, JobKind, JobProgress, JobResult, JobStatus
+from progdata_crawler.models.jobs import (
+    Job,
+    JobKind,
+    JobProgress,
+    JobResult,
+    JobStatus,
+    JobView,
+)
 from progdata_crawler.models.options import (
     DEFAULT_CACHE_TTL_SECONDS,
     DEFAULT_OUTPUTS,
@@ -43,6 +50,7 @@ __all__ = [
     "JobProgress",
     "JobResult",
     "JobStatus",
+    "JobView",
     "Link",
     "Meta",
     "Output",

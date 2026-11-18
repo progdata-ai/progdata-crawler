@@ -4,17 +4,23 @@ Every response uses the same envelope (`data`, `meta`, `error`). Errors carry a 
 code in `error.code` and the matching HTTP status. Start it with `progdata-crawler serve`.
 """
 
-from collections.abc import AsyncGenerator
+import logging
+import time
+import uuid
+from collections.abc import AsyncGenerator, Awaitable, Mapping
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from progdata_crawler import __version__
 from progdata_crawler.core.crawler import Crawler
 from progdata_crawler.core.discover import discover_envelope
+from progdata_crawler.core.errors import CrawlerError
+from progdata_crawler.core.jobs.manager import JobManager
+from progdata_crawler.core.jobs.queue import JobHandler
 from progdata_crawler.models import (
     DiscoverRequest,
     DiscoverResult,
@@ -22,10 +28,16 @@ from progdata_crawler.models import (
     ErrorCode,
     ErrorInfo,
     FetchRequest,
+    Job,
+    JobKind,
+    JobView,
     Meta,
     Page,
 )
+from progdata_crawler.models.jobs import MAX_RESULTS_PER_REQUEST
 from progdata_crawler.settings import Settings
+
+log = logging.getLogger(__name__)
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
@@ -34,6 +46,7 @@ ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     for status, description in (
         (403, "robots_disallowed: robots.txt does not allow the URL"),
         (415, "unsupported_type: the content type or size cannot be handled"),
+        (404, "not_found: no job with this id"),
         (422, "invalid_request: the request failed validation"),
         (429, "rate_limited: the site asked us to slow down"),
         (502, "blocked_by_site or fetch_failed"),
@@ -53,13 +66,41 @@ def _envelope_response(envelope: Envelope[Any]) -> JSONResponse:
     return JSONResponse(envelope.model_dump(mode="json"), status_code=status, headers=headers)
 
 
-def create_app(settings: Settings, *, store_path: str | None = None) -> FastAPI:
-    """Build the REST app. The crawler starts and stops with the app."""
+async def _enveloped[T](
+    result_type: type[T], operation: Awaitable[T], request: Request
+) -> JSONResponse:
+    """Run a core operation and wrap its result or `CrawlerError` in an envelope."""
+    request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
+    started = time.monotonic()
+    data: T | None = None
+    error: ErrorInfo | None = None
+    try:
+        data = await operation
+    except CrawlerError as exc:
+        error = exc.to_error_info()
+    except Exception:
+        log.exception("unexpected error", extra={"request_id": request_id})
+        error = ErrorInfo(code=ErrorCode.INTERNAL_ERROR, message="unexpected internal error")
+    meta = Meta(request_id=request_id, took_ms=round((time.monotonic() - started) * 1000))
+    return _envelope_response(Envelope[result_type](data=data, meta=meta, error=error))
+
+
+def create_app(
+    settings: Settings,
+    *,
+    store_path: str | None = None,
+    job_handlers: Mapping[JobKind, JobHandler] | None = None,
+) -> FastAPI:
+    """Build the REST app. The crawler and the job service start and stop with the app."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-        async with Crawler(settings, store_path=store_path) as crawler:
+        async with (
+            Crawler(settings, store_path=store_path) as crawler,
+            JobManager(settings, job_handlers or {}, page_store=crawler.store) as jobs,
+        ):
             app.state.crawler = crawler
+            app.state.jobs = jobs
             yield
 
     app = FastAPI(
@@ -117,6 +158,36 @@ def create_app(settings: Settings, *, store_path: str | None = None) -> FastAPI:
             crawler, body, request_id=request.headers.get(REQUEST_ID_HEADER)
         )
         return _envelope_response(envelope)
+
+    @app.get(
+        "/v1/jobs/{job_id}",
+        response_model=Envelope[JobView],
+        responses=ERROR_RESPONSES,
+        summary="Job status and results",
+        description="The job's status and progress, and its results after `cursor`. "
+        "Read all results by passing `next_cursor` back until `complete` is true.",
+    )
+    async def get_job(  # pyright: ignore[reportUnusedFunction]
+        job_id: str,
+        request: Request,
+        cursor: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=MAX_RESULTS_PER_REQUEST)] = 100,
+    ) -> JSONResponse:
+        jobs: JobManager = request.app.state.jobs
+        return await _enveloped(JobView, jobs.view(job_id, cursor=cursor, limit=limit), request)
+
+    @app.delete(
+        "/v1/jobs/{job_id}",
+        response_model=Envelope[Job],
+        responses=ERROR_RESPONSES,
+        summary="Cancel a job",
+        description="Stop a queued or running job. A finished job is returned unchanged.",
+    )
+    async def cancel_job(  # pyright: ignore[reportUnusedFunction]
+        job_id: str, request: Request
+    ) -> JSONResponse:
+        jobs: JobManager = request.app.state.jobs
+        return await _enveloped(Job, jobs.cancel_job(job_id), request)
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]

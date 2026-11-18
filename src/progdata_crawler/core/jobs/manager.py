@@ -6,11 +6,13 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Self
 
+from progdata_crawler.core.errors import CrawlerError
 from progdata_crawler.core.jobs.cleanup import RetentionCleaner
 from progdata_crawler.core.jobs.queue import InProcessQueue, JobHandler
 from progdata_crawler.core.jobs.store import JobStore
 from progdata_crawler.core.store.sqlite import PageStore
-from progdata_crawler.models.jobs import Job, JobKind, JobResult, JobStatus
+from progdata_crawler.models.envelope import ErrorCode
+from progdata_crawler.models.jobs import Job, JobKind, JobResult, JobStatus, JobView
 from progdata_crawler.models.options import Retention
 from progdata_crawler.settings import Settings
 
@@ -91,6 +93,37 @@ class JobManager:
         await self._queue.cancel(job_id)
         return await self.get(job_id)
 
+    async def view(self, job_id: str, *, cursor: int = 0, limit: int = 100) -> JobView:
+        """The job's status and its results after `cursor`. Raises `not_found`."""
+        job = await self._existing(job_id)
+        results = await self.results(job_id, after=cursor, limit=limit)
+        next_cursor = results[-1].seq if results else cursor
+        return JobView(
+            job=job,
+            results=tuple(results),
+            next_cursor=next_cursor,
+            complete=job.status.finished and len(results) < limit,
+        )
+
+    async def cancel_job(self, job_id: str) -> Job:
+        """Cancel a queued or running job and return it. Finished jobs are left as they are.
+        Raises `not_found`."""
+        await self._existing(job_id)
+        job = await self.cancel(job_id)
+        if job is None:  # deleted by the cleanup in the meantime
+            raise _not_found(job_id)
+        return job
+
+    async def _existing(self, job_id: str) -> Job:
+        job = await self.get(job_id)
+        if job is None:
+            raise _not_found(job_id)
+        return job
+
     async def cleanup(self) -> tuple[int, int]:
         """Run the retention cleanup now."""
         return await self._cleaner.run_once()
+
+
+def _not_found(job_id: str) -> CrawlerError:
+    return CrawlerError(ErrorCode.NOT_FOUND, "no job with this id", job_id=job_id)
