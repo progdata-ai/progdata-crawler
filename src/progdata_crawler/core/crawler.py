@@ -18,6 +18,7 @@ import base64
 import logging
 import time
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
@@ -36,9 +37,9 @@ from progdata_crawler.core.fetch.detect import (
     should_render_first,
 )
 from progdata_crawler.core.fetch.guard import AddressGuard
-from progdata_crawler.core.fetch.http import HttpFetcher, raise_for_blocked
+from progdata_crawler.core.fetch.http import HttpFetcher, HttpResponse, raise_for_blocked
 from progdata_crawler.core.polite.ratelimit import BACKOFF_STATUSES, DomainRateLimiter
-from progdata_crawler.core.polite.robots import RobotsPolicy
+from progdata_crawler.core.polite.robots import RobotsPolicy, RobotsRules
 from progdata_crawler.core.store.cache import PageCache
 from progdata_crawler.core.store.sqlite import PageStore
 from progdata_crawler.models.envelope import Envelope, ErrorCode, ErrorInfo, Meta
@@ -170,6 +171,33 @@ class Crawler:
         page = await asyncio.to_thread(build_page, source, options)
         await self._cache.put(url, options, page, rendered=source.rendered)
         return FetchOutcome(page, cached=False, rendered=source.rendered)
+
+    async def fetch_document(
+        self,
+        url: str,
+        *,
+        accept_types: Collection[str] | None,
+        max_bytes: int | None = None,
+        timeout_ms: int | None = None,
+    ) -> HttpResponse:
+        """Fetch a non-page document (a sitemap, a file) with the same politeness as pages:
+        address guard, robots.txt and the per-domain rate limit. Raises `blocked_by_site`
+        and `rate_limited` like page fetches."""
+        options = PageOptions(timeout_ms=timeout_ms or self.settings.timeout_ms)
+        await self._polite_wait(url, options)
+        response = await self._http.fetch(
+            url, timeout_ms=options.timeout_ms, accept_types=accept_types, max_bytes=max_bytes
+        )
+        self._raise_if_throttled(url, response.status, response.headers.get("retry-after"))
+        raise_for_blocked(response)
+        if response.url != url:
+            await self._robots.check(response.url)
+        return response
+
+    async def robots_rules(self, url: str) -> RobotsRules:
+        """The robots.txt rules for the origin of `url`."""
+        await self._guard.check_url(url)
+        return await self._robots.rules_for(url)
 
     async def _polite_wait(self, url: str, options: PageOptions) -> None:
         await self._guard.check_url(url)

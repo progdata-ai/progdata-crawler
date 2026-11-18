@@ -14,7 +14,17 @@ from fastapi.responses import JSONResponse
 
 from progdata_crawler import __version__
 from progdata_crawler.core.crawler import Crawler
-from progdata_crawler.models import Envelope, ErrorCode, ErrorInfo, FetchRequest, Meta, Page
+from progdata_crawler.core.discover import discover_envelope
+from progdata_crawler.models import (
+    DiscoverRequest,
+    DiscoverResult,
+    Envelope,
+    ErrorCode,
+    ErrorInfo,
+    FetchRequest,
+    Meta,
+    Page,
+)
 from progdata_crawler.settings import Settings
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -32,7 +42,7 @@ ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 }
 
 
-def _envelope_response(envelope: Envelope[Page]) -> JSONResponse:
+def _envelope_response(envelope: Envelope[Any]) -> JSONResponse:
     headers: dict[str, str] = {REQUEST_ID_HEADER: envelope.meta.request_id}
     status = 200
     if envelope.error is not None:
@@ -88,6 +98,23 @@ def create_app(settings: Settings, *, store_path: str | None = None) -> FastAPI:
         crawler: Crawler = request.app.state.crawler
         envelope = await crawler.fetch_envelope(
             body, request_id=request.headers.get(REQUEST_ID_HEADER)
+        )
+        return _envelope_response(envelope)
+
+    @app.post(
+        "/v1/discover",
+        response_model=Envelope[DiscoverResult],
+        responses=ERROR_RESPONSES,
+        summary="Discover the URLs of a site",
+        description="List a site's URLs from its sitemaps and the links on its start page, "
+        "without fetching every page.",
+    )
+    async def discover(  # pyright: ignore[reportUnusedFunction]
+        body: DiscoverRequest, request: Request
+    ) -> JSONResponse:
+        crawler: Crawler = request.app.state.crawler
+        envelope = await discover_envelope(
+            crawler, body, request_id=request.headers.get(REQUEST_ID_HEADER)
         )
         return _envelope_response(envelope)
 

@@ -16,6 +16,9 @@ def test_exports_a_schema_for_every_public_model() -> None:
         "PageMetadata",
         "Link",
         "Image",
+        "DiscoverRequest",
+        "DiscoverResult",
+        "DiscoveredUrl",
     }
     for schema in schemas.values():
         assert schema["type"] == "object"

@@ -65,6 +65,17 @@ class RenderMode(StrEnum):
     NEVER = "never"
 
 
+class Scope(StrEnum):
+    """How far discover and harvest may go from the start URL."""
+
+    SITE = "site"
+    """The same host only (a leading `www.` is ignored)."""
+    SUBDOMAINS = "subdomains"
+    """The host and its subdomains."""
+    EXTERNAL = "external"
+    """Any host."""
+
+
 class Retention(StrEnum):
     """What may be stored after the response is sent."""
 

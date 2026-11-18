@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from progdata_crawler.models.discover import DiscoveredUrl, DiscoverRequest, DiscoverResult
 from progdata_crawler.models.envelope import ErrorInfo, Meta
 from progdata_crawler.models.fetch import FetchRequest
 from progdata_crawler.models.options import PageOptions, PathFilter, SelectorFilter
@@ -20,6 +21,9 @@ PUBLIC_MODELS: tuple[type[BaseModel], ...] = (
     PageMetadata,
     Link,
     Image,
+    DiscoverRequest,
+    DiscoverResult,
+    DiscoveredUrl,
 )
 
 

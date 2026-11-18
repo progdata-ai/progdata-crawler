@@ -1,5 +1,11 @@
 """Pydantic models shared by all entry points."""
 
+from progdata_crawler.models.discover import (
+    DiscoveredUrl,
+    DiscoverRequest,
+    DiscoverResult,
+    UrlSource,
+)
 from progdata_crawler.models.envelope import Envelope, ErrorCode, ErrorInfo, Meta
 from progdata_crawler.models.fetch import FetchRequest
 from progdata_crawler.models.jobs import Job, JobKind, JobProgress, JobResult, JobStatus
@@ -13,6 +19,7 @@ from progdata_crawler.models.options import (
     PathFilter,
     RenderMode,
     Retention,
+    Scope,
     SelectorFilter,
 )
 from progdata_crawler.models.page import Image, Link, Page, PageMetadata
@@ -23,6 +30,9 @@ __all__ = [
     "DEFAULT_OUTPUTS",
     "ContentMode",
     "Device",
+    "DiscoverRequest",
+    "DiscoverResult",
+    "DiscoveredUrl",
     "Envelope",
     "ErrorCode",
     "ErrorInfo",
@@ -42,6 +52,8 @@ __all__ = [
     "PathFilter",
     "RenderMode",
     "Retention",
+    "Scope",
     "SelectorFilter",
+    "UrlSource",
     "json_schemas",
 ]

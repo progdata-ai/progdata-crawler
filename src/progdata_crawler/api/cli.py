@@ -8,16 +8,20 @@ from pydantic import ValidationError
 
 from progdata_crawler import __version__
 from progdata_crawler.core.crawler import Crawler
+from progdata_crawler.core.discover import discover_envelope
 from progdata_crawler.log import configure_logging
 from progdata_crawler.models import (
     ContentMode,
     Device,
+    DiscoverRequest,
+    DiscoverResult,
     Envelope,
     FetchRequest,
     Output,
     Page,
     RenderMode,
     Retention,
+    Scope,
 )
 from progdata_crawler.settings import Settings, get_settings
 
@@ -156,6 +160,69 @@ def _human_readable(page: Page) -> str:
 
 
 @app.command()
+def discover(
+    url: Annotated[str, typer.Argument(help="The start page of the site.")],
+    query: Annotated[
+        str | None, typer.Option(help="Keep URLs whose address or link text has every word.")
+    ] = None,
+    include_path: Annotated[
+        list[str] | None, typer.Option(help="Regex a URL path must match. Repeatable.")
+    ] = None,
+    exclude_path: Annotated[
+        list[str] | None, typer.Option(help="Regex of URL paths to leave out. Repeatable.")
+    ] = None,
+    scope: Annotated[Scope, typer.Option(help="How far from the start host to go.")] = Scope.SITE,
+    sitemaps: Annotated[
+        bool, typer.Option("--sitemaps/--no-sitemaps", help="Read the sitemaps.")
+    ] = True,
+    links: Annotated[
+        bool, typer.Option("--links/--no-links", help="Read the links on the start page.")
+    ] = True,
+    limit: Annotated[int, typer.Option(help="Most URLs to return.")] = 1_000,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print the full response envelope as JSON.")
+    ] = False,
+) -> None:
+    """List the URLs of a site from its sitemaps and start page, one per line."""
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_format)
+    try:
+        request = DiscoverRequest.model_validate(
+            {
+                "url": url,
+                "query": query,
+                "paths": {"include": include_path or [], "exclude": exclude_path or []},
+                "scope": scope,
+                "sitemaps": sitemaps,
+                "links": links,
+                "limit": limit,
+            }
+        )
+    except ValidationError as error:
+        typer.echo(f"Invalid options: {error.errors()[0]['msg']}", err=True)
+        raise typer.Exit(2) from error
+
+    envelope = asyncio.run(_discover(_local(settings), request))
+
+    if as_json:
+        typer.echo(envelope.model_dump_json(indent=2, exclude_none=True))
+    elif envelope.error is not None:
+        typer.echo(f"Error ({envelope.error.code.value}): {envelope.error.message}", err=True)
+    elif envelope.data is not None:
+        for item in envelope.data.urls:
+            typer.echo(item.url)
+        if envelope.data.truncated:
+            typer.echo(f"(stopped at --limit {limit})", err=True)
+    if envelope.error is not None:
+        raise typer.Exit(1)
+
+
+async def _discover(settings: Settings, request: DiscoverRequest) -> Envelope[DiscoverResult]:
+    async with Crawler(settings) as crawler:
+        return await discover_envelope(crawler, request)
+
+
+@app.command()
 def mcp(
     http: Annotated[
         bool, typer.Option("--http", help="Serve streamable HTTP instead of stdio.")
@@ -180,7 +247,7 @@ def serve(
     host: Annotated[str, typer.Option(help="Interface to listen on.")] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Port to listen on.")] = 8000,
 ) -> None:
-    """Run the REST API (POST /v1/fetch, OpenAPI docs at /docs)."""
+    """Run the REST API (POST /v1/fetch and /v1/discover, OpenAPI docs at /docs)."""
     import uvicorn
 
     from progdata_crawler.api.rest import create_app
