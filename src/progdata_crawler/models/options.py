@@ -108,6 +108,8 @@ class PageOptions(_StrictModel):
     geo: str | None = Field(default=None, pattern=r"^[A-Z]{2}$", examples=["NO"])
     """Preferred region as an ISO 3166-1 alpha-2 country code."""
     render: RenderMode = RenderMode.AUTO
+    full_page_screenshot: bool = False
+    """With the `screenshot` output: capture the whole page instead of the visible part."""
     cache_ttl: int = Field(default=DEFAULT_CACHE_TTL_SECONDS, ge=0)
     """Maximum age in seconds of a cached result. 0 always fetches a fresh copy."""
     timeout_ms: int = Field(default=DEFAULT_TIMEOUT_MS, gt=0, le=MAX_TIMEOUT_MS)

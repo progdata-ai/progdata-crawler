@@ -12,7 +12,17 @@ from progdata_crawler.core.store.sqlite import CachedPage, PageStore
 from progdata_crawler.models.options import PageOptions, Retention
 from progdata_crawler.models.page import Page
 
-KEY_FIELDS = ("outputs", "content", "tags", "wait_ms", "device", "locale", "geo", "render")
+KEY_FIELDS = (
+    "outputs",
+    "content",
+    "tags",
+    "wait_ms",
+    "device",
+    "locale",
+    "geo",
+    "render",
+    "full_page_screenshot",
+)
 
 
 def cache_key(url: str, options: PageOptions) -> str:
