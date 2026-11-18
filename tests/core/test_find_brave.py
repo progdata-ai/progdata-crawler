@@ -36,11 +36,25 @@ class Recorder:
         return httpx.Response(200, json=recorded(source))
 
 
-def brave(recorder: Recorder, key: str | None = KEY) -> BraveSearch:
+class Robots:
+    """Stands in for `Crawler.check_robots`: remembers URLs, refuses those it is told to."""
+
+    def __init__(self, disallow: str | None = None) -> None:
+        self.checked: list[str] = []
+        self._disallow = disallow
+
+    async def __call__(self, url: str) -> None:
+        self.checked.append(url)
+        if self._disallow is not None and self._disallow in url:
+            raise CrawlerError(ErrorCode.ROBOTS_DISALLOWED, "no", url=url)
+
+
+def brave(recorder: Recorder, key: str | None = KEY, robots: Robots | None = None) -> BraveSearch:
     return BraveSearch(
         key,
         user_agent=default_user_agent(),
         guard=AddressGuard(allow_private=False),
+        robots=robots or Robots(),
         transport=httpx.MockTransport(recorder),
     )
 
@@ -180,7 +194,7 @@ async def test_without_a_key_nothing_is_sent() -> None:
 
 async def test_provider_comes_from_settings(tmp_path: Path) -> None:
     settings = Settings(data_dir=tmp_path, brave_api_key="k")  # pyright: ignore[reportArgumentType]
-    provider = create_provider(settings)
+    provider = create_provider(settings, Robots())
     assert provider.name == "brave"
     await provider.aclose()
 
@@ -199,3 +213,23 @@ def test_request_limits() -> None:
         FindRequest.model_validate({"query": "x", "country": "norway"})
     with pytest.raises(ValueError):
         FindRequest.model_validate({"query": "x", "sources": []})
+
+
+async def test_every_call_is_checked_against_robots_txt() -> None:
+    robots = Robots()
+    recorder = Recorder()
+    provider = brave(recorder, robots=robots)
+    await search(provider, request(sources=["web", "news"]))
+    await provider.aclose()
+    assert sorted(robots.checked) == sorted(str(sent.url) for sent in recorder.requests)
+    assert len(robots.checked) == 2
+
+
+async def test_a_disallowed_api_is_not_called() -> None:
+    recorder = Recorder()
+    provider = brave(recorder, robots=Robots(disallow="/news/"))
+    with pytest.raises(CrawlerError) as raised:
+        await search(provider, request(sources=["news"]))
+    await provider.aclose()
+    assert raised.value.code is ErrorCode.ROBOTS_DISALLOWED
+    assert recorder.requests == []

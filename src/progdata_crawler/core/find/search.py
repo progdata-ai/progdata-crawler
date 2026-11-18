@@ -6,9 +6,8 @@ import logging
 from progdata_crawler.core.crawler import Crawler
 from progdata_crawler.core.errors import CrawlerError
 from progdata_crawler.core.fetch.guard import AddressGuard
-from progdata_crawler.core.find.brave import BraveSearch
+from progdata_crawler.core.find.brave import BraveSearch, RobotsCheck
 from progdata_crawler.core.find.provider import SearchProvider
-from progdata_crawler.core.find.searxng import SearxngSearch
 from progdata_crawler.core.urls import UrlDeduplicator
 from progdata_crawler.models.envelope import ErrorCode, ErrorInfo
 from progdata_crawler.models.fetch import FetchRequest
@@ -19,8 +18,9 @@ from progdata_crawler.settings import SearchProviderName, Settings
 log = logging.getLogger(__name__)
 
 
-def create_provider(settings: Settings) -> SearchProvider:
-    """The provider `PDC_SEARCH_PROVIDER` names. Calls to it go through the address guard."""
+def create_provider(settings: Settings, robots: RobotsCheck) -> SearchProvider:
+    """The provider `PDC_SEARCH_PROVIDER` names. Calls to it go through the address guard,
+    and `robots` (normally `Crawler.check_robots`) checks each against robots.txt."""
     guard = AddressGuard(allow_private=bool(settings.allow_private_networks))
     match settings.search_provider:
         case SearchProviderName.BRAVE:
@@ -29,9 +29,9 @@ def create_provider(settings: Settings) -> SearchProvider:
                 key.get_secret_value() if key is not None else None,
                 user_agent=settings.user_agent,
                 guard=guard,
+                robots=robots,
+                api_url=settings.brave_api_url,
             )
-        case SearchProviderName.SEARXNG:
-            return SearxngSearch(settings.searxng_url, user_agent=settings.user_agent)
 
 
 async def search(provider: SearchProvider, request: FindRequest) -> FindResult:

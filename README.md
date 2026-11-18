@@ -8,7 +8,7 @@ One core, three entry points: the same logic is available through a CLI (`progda
 
 ## Principles
 
-- **Polite by default.** robots.txt is respected, requests are rate limited per domain, and the User-Agent is honest: `progdata-crawler/<version> (+https://progdata.no/bot)`. Sites that block crawlers are not worked around.
+- **Polite, always.** robots.txt is respected for every request, with no exceptions or allowlists, requests are rate limited per domain, and the User-Agent is honest: `progdata-crawler/<version> (+https://progdata.no/bot)`. Sites that block crawlers are not worked around.
 - **Local first.** Runs for free on your own machine. Results are cached in SQLite.
 - **LLM-ready output.** Clean markdown and structured data, not raw HTML.
 
@@ -185,15 +185,13 @@ Set with environment variables, or in a `.env` file in the working directory.
 | `PDC_TIMEOUT_MS` | 30 000 | Default time limit per page |
 | `PDC_RATE_LIMIT_INTERVAL_S` | 1.0 | Minimum seconds between requests to the same host |
 | `PDC_ALLOW_PRIVATE_NETWORKS` | unset | Whether internal addresses (127.0.0.1, 10.x, 169.254.169.254 …) may be fetched. Unset: allowed for the CLI and MCP over stdio, refused for `serve` and `mcp --http` |
-| `PDC_ROBOTS_ALLOWLIST` | `[]` | JSON list of domains where robots.txt is not applied, for our own sites or sites that gave us permission |
 | `PDC_BROWSER_EXECUTABLE` | unset | Use this Chromium instead of the one Playwright installs |
 | `PDC_BROWSER_MAX_PAGES` | 4 | Pages the browser may render at the same time |
 | `PDC_RETENTION_DAYS` | 7 | Cached pages and finished jobs older than this are deleted |
 | `PDC_MAX_CONCURRENT_JOBS` | 2 | Jobs (harvest, bulk) that run at the same time |
 | `PDC_BULK_CONCURRENCY` | 8 | Pages bulk jobs fetch at the same time, across all bulk jobs |
-| `PDC_SEARCH_PROVIDER` | `brave` | The search provider for find: `brave` or `searxng` |
+| `PDC_SEARCH_PROVIDER` | `brave` | The search provider for find |
 | `PDC_BRAVE_API_KEY` | unset | Key for the [Brave Search API](https://brave.com/search/api/), the default search provider |
-| `PDC_SEARXNG_URL` | unset | Address of a SearXNG instance you run, for `PDC_SEARCH_PROVIDER=searxng` |
 | `PDC_WEBHOOK_SECRET` | unset | Key that signs webhooks to `notify_url`. Jobs with a `notify_url` are refused while unset |
 | `PDC_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR` |
 | `PDC_LOG_FORMAT` | `text` | `text` or `json` (one object per line) |
@@ -204,15 +202,7 @@ Logs go to stderr.
 
 Find searches the web through a search provider. The default is the [Brave Search API](https://brave.com/search/api/): set `PDC_BRAVE_API_KEY`.
 
-To search through a SearXNG instance you run yourself instead, start the one in `docker-compose.yml` and point progdata-crawler at it:
-
-```bash
-export SEARXNG_SECRET=$(openssl rand -hex 32)
-docker compose up -d                     # SearXNG on http://127.0.0.1:8888
-export PDC_SEARCH_PROVIDER=searxng PDC_SEARXNG_URL=http://127.0.0.1:8888
-```
-
-SearXNG collects results from other search engines. Our settings (`deploy/searxng/settings.yml`) enable only engines that use an official API: Wikipedia, Wikidata, Wikinews, Wikimedia Commons and Openverse. SearXNG can also scrape the result pages of search engines, and many of them forbid that. If you enable more engines, making sure they allow automated queries is your responsibility.
+Calls to the search API follow the same rules as any other request: they are checked against the API host's robots.txt.
 
 ## Webhooks
 

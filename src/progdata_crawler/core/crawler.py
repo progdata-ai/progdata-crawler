@@ -169,7 +169,7 @@ class Crawler:
             executable_path=settings.browser_executable,
             guard=self._guard,
         )
-        self._robots = RobotsPolicy(self._http.fetch_robots, allowlist=settings.robots_allowlist)
+        self._robots = RobotsPolicy(self._http.fetch_robots)
         self._rate = DomainRateLimiter(min_interval_s=settings.rate_limit_interval_s)
         self._store = PageStore(store_path if store_path is not None else settings.cache_db_path)
         self._cache = PageCache(self._store)
@@ -231,6 +231,12 @@ class Crawler:
         if response.url != url:
             await self._robots.check(response.url)
         return response
+
+    async def check_robots(self, url: str) -> None:
+        """Raise `address_not_allowed` or `robots_disallowed` unless we may request `url`.
+        For requests that do not go through `fetch`, such as calls to search APIs."""
+        await self._guard.check_url(url)
+        await self._robots.check(url)
 
     async def robots_rules(self, url: str) -> RobotsRules:
         """The robots.txt rules for the origin of `url`."""

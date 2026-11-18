@@ -8,6 +8,7 @@ the API and never logged.
 import html
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 import httpx
@@ -20,6 +21,9 @@ from progdata_crawler.models.find import FindRequest, SearchHit, SearchSource, T
 log = logging.getLogger(__name__)
 
 API_URL = "https://api.search.brave.com/res/v1"
+
+RobotsCheck = Callable[[str], Awaitable[None]]
+"""Raises `CrawlerError` unless robots.txt allows the URL (`Crawler.check_robots`)."""
 TIMEOUT_S = 15.0
 
 _ENDPOINTS = {
@@ -97,10 +101,13 @@ class BraveSearch:
         *,
         user_agent: str,
         guard: AddressGuard,
+        robots: RobotsCheck,
         transport: httpx.AsyncBaseTransport | None = None,
         api_url: str = API_URL,
     ) -> None:
+        """Every call is checked against the API host's robots.txt with `robots`."""
         self._api_key = api_key
+        self._robots = robots
         self._api_url = api_url.rstrip("/")
         self._client = guarded_client(
             guard,
@@ -126,12 +133,10 @@ class BraveSearch:
             params["search_lang"] = request.language
         if source is SearchSource.WEB:
             params["result_filter"] = "web"
+        url = str(httpx.URL(self._api_url + _ENDPOINTS[source], params=params))
+        await self._robots(url)
         try:
-            response = await self._client.get(
-                self._api_url + _ENDPOINTS[source],
-                params=params,
-                headers={"X-Subscription-Token": self._api_key},
-            )
+            response = await self._client.get(url, headers={"X-Subscription-Token": self._api_key})
         except httpx.TimeoutException as error:
             raise CrawlerError(
                 ErrorCode.FETCH_TIMEOUT, "the search provider did not answer in time"

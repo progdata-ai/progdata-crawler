@@ -149,7 +149,7 @@ def create_app(
         ):
             app.state.crawler = crawler
             app.state.jobs = jobs
-            provider = search_provider or create_provider(settings)
+            provider = search_provider or create_provider(settings, crawler.check_robots)
             app.state.search = provider
             try:
                 yield
