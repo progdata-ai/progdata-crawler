@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     """Default time limit per page when a request does not set one."""
     data_dir: Path = Field(default_factory=lambda: Path.home() / ".progdata-crawler")
     """Directory for local data such as the SQLite cache."""
+    robots_allowlist: tuple[str, ...] = ()
+    """Domains where robots.txt is not applied: our own sites and sites that have given
+    us permission. Subdomains are included. Set as JSON, e.g. `["progdata.no"]`."""
     log_level: LogLevel = LogLevel.INFO
     log_format: LogFormat = LogFormat.TEXT
 

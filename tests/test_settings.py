@@ -71,3 +71,9 @@ def test_rejects_invalid_values(monkeypatch: pytest.MonkeyPatch, name: str, valu
     monkeypatch.setenv(name, value)
     with pytest.raises(ValidationError):
         Settings()
+
+
+def test_robots_allowlist_is_read_as_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert Settings().robots_allowlist == ()
+    monkeypatch.setenv("PDC_ROBOTS_ALLOWLIST", '["progdata.no", "example.org"]')
+    assert Settings().robots_allowlist == ("progdata.no", "example.org")
