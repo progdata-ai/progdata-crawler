@@ -28,6 +28,7 @@ from progdata_crawler.core.jobs.events import job_events
 from progdata_crawler.core.jobs.handlers import job_handlers as default_job_handlers
 from progdata_crawler.core.jobs.manager import JobManager
 from progdata_crawler.core.jobs.queue import JobHandler
+from progdata_crawler.core.session.browser_session import SessionManager
 from progdata_crawler.core.store.query import query_pages
 from progdata_crawler.models import (
     BulkRequest,
@@ -51,6 +52,9 @@ from progdata_crawler.models import (
     Page,
     QueryRequest,
     QueryResult,
+    SessionOpenRequest,
+    SessionStepRequest,
+    SessionView,
 )
 from progdata_crawler.models.jobs import MAX_JOB_WAIT_S, MAX_RESULTS_PER_REQUEST
 from progdata_crawler.settings import Settings
@@ -146,9 +150,11 @@ def create_app(
                 job_handlers if job_handlers is not None else default_job_handlers(crawler),
                 page_store=crawler.store,
             ) as jobs,
+            SessionManager(crawler) as sessions,
         ):
             app.state.crawler = crawler
             app.state.jobs = jobs
+            app.state.sessions = sessions
             provider = search_provider or create_provider(
                 settings, robots=crawler.check_robots, store=crawler.store
             )
@@ -266,6 +272,47 @@ def create_app(
         name: Annotated[str, Query(min_length=1, max_length=255)] = "upload",
     ) -> JSONResponse:
         return await _enveloped(ConvertResult, _convert_upload(request, name), request)
+
+    @app.post(
+        "/v1/session",
+        response_model=Envelope[SessionView],
+        responses=ERROR_RESPONSES,
+        summary="Open a browser session",
+        description="Open `url` in a browser session that stays open, so you can run steps "
+        "one call at a time. The page options apply to every answer in the session. "
+        "Sessions close after a while without use.",
+    )
+    async def open_session(  # pyright: ignore[reportUnusedFunction]
+        body: SessionOpenRequest, request: Request
+    ) -> JSONResponse:
+        sessions: SessionManager = request.app.state.sessions
+        return await _enveloped(SessionView, sessions.open(body), request)
+
+    @app.post(
+        "/v1/session/{session_id}/step",
+        response_model=Envelope[SessionView],
+        responses=ERROR_RESPONSES,
+        summary="Run steps in a browser session",
+        description="Run `steps` (click, type, press, scroll, wait, capture) in the session "
+        "and get the page back as it is afterwards.",
+    )
+    async def session_step(  # pyright: ignore[reportUnusedFunction]
+        session_id: str, body: SessionStepRequest, request: Request
+    ) -> JSONResponse:
+        sessions: SessionManager = request.app.state.sessions
+        return await _enveloped(SessionView, sessions.step(session_id, body), request)
+
+    @app.delete(
+        "/v1/session/{session_id}",
+        response_model=Envelope[SessionView],
+        responses=ERROR_RESPONSES,
+        summary="Close a browser session",
+    )
+    async def close_session(  # pyright: ignore[reportUnusedFunction]
+        session_id: str, request: Request
+    ) -> JSONResponse:
+        sessions: SessionManager = request.app.state.sessions
+        return await _enveloped(SessionView, sessions.close(session_id), request)
 
     @app.post(
         "/v1/query",

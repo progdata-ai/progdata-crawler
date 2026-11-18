@@ -95,6 +95,12 @@ class Settings(BaseSettings):
     """Key for the Brave Search API."""
     brave_api_url: str = "https://api.search.brave.com/res/v1"
     """Address of the Brave Search API. Change it only for tests."""
+    session_ttl_s: int = Field(default=300, ge=10, le=3_600)
+    """A browser session closes after this many seconds without use."""
+    session_max_age_s: int = Field(default=1_800, ge=60, le=24 * 3_600)
+    """A browser session closes after this many seconds, used or not."""
+    max_sessions: int = Field(default=4, ge=1, le=64)
+    """Browser sessions open at the same time."""
     llm_provider: LlmProviderName | None = None
     """The LLM for summaries, structured extraction and goals. Unset: those features are off."""
     llm_model: str | None = None

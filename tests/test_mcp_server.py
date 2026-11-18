@@ -45,6 +45,7 @@ async def test_lists_the_fetch_tool(tmp_path: Path, test_site: SiteServer) -> No
         "pdc_query",
         "pdc_find",
         "pdc_convert",
+        "pdc_session",
         "pdc_discover",
         "pdc_harvest",
         "pdc_bulk",
@@ -115,3 +116,38 @@ async def test_query_finds_fetched_pages(tmp_path: Path, test_site: SiteServer) 
     assert hits[0]["title"] == "How we bake our sourdough"
     assert "[sourdough]" in hits[0]["snippet"].lower()
     assert invalid["error"]["code"] == "invalid_request"
+
+
+async def test_session_tool(tmp_path: Path, test_site: SiteServer) -> None:
+    test_site.add("/submit", "<html><body><h1>Thank you for your order</h1></body></html>")
+    async with connect(tmp_path, test_site) as client:
+        opened = await call(
+            client, {"action": "open", "url": test_site.url("/form.html")}, tool="pdc_session"
+        )
+        session_id = opened["data"]["id"]
+        sent = await call(
+            client,
+            {
+                "action": "step",
+                "session_id": session_id,
+                "steps": [
+                    {"action": "type", "selector": "#name", "text": "Ada"},
+                    {"action": "click", "selector": "#send"},
+                ],
+            },
+            tool="pdc_session",
+        )
+        closed = await call(
+            client, {"action": "close", "session_id": session_id}, tool="pdc_session"
+        )
+        gone = await call(client, {"action": "step", "session_id": session_id}, tool="pdc_session")
+        bad = await call(
+            client,
+            {"action": "step", "session_id": "x", "steps": [{"action": "fly"}]},
+            tool="pdc_session",
+        )
+    assert "Order bread" in opened["data"]["page"]["markdown"]
+    assert sent["data"]["page"]["markdown"].startswith("# Thank you for your order")
+    assert closed["data"]["closed"] is True
+    assert gone["error"]["code"] == "not_found"
+    assert bad["error"]["code"] == "invalid_request"

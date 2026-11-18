@@ -41,6 +41,7 @@ The MCP server gives Claude these tools:
 | `pdc_fetch` | Fetch one page as markdown and other outputs |
 | `pdc_find` | Search the web; with `fetch` also read the hits |
 | `pdc_convert` | A PDF, DOCX or XLSX document at a URL as markdown |
+| `pdc_session` | Use a page step by step in a browser session that stays open |
 | `pdc_discover` | List a site's URLs from its sitemaps and start page |
 | `pdc_harvest` | Crawl a site within `max_pages` and `max_depth` (a job) |
 | `pdc_bulk` | Fetch many URLs in parallel (a job) |
@@ -127,6 +128,9 @@ curl -s http://127.0.0.1:8000/v1/fetch \
 | `GET /v1/jobs/{id}?cursor=&limit=` | Job status, progress and the results after `cursor` |
 | `GET /v1/jobs/{id}/events` | Live job events (Server-Sent Events), resumable with `Last-Event-ID` |
 | `DELETE /v1/jobs/{id}` | Cancel a job |
+| `POST /v1/session` | Open a browser session |
+| `POST /v1/session/{id}/step` | Run steps in the session and get the page back |
+| `DELETE /v1/session/{id}` | Close a session |
 | `POST /v1/query` | Search pages fetched before |
 
 Harvest and bulk answer with the job right away, or after up to `wait_s` seconds with its first results. Read all results by passing `next_cursor` back as `cursor` until `complete` is true.
@@ -175,6 +179,19 @@ The same options work in the CLI, the MCP tool and the REST API.
 
 A `capture` step records the page at that point in `captures`. A step whose element is not found within its `timeout_ms` (default 5 000) gives `step_failed`, naming the step. Every page the browser goes to because of a step (a link, a form, a redirect) is checked against robots.txt and the rate limit like any other request. Pages with steps always use the browser and are never cached.
 
+### Browser sessions
+
+A session keeps one page open across calls, so an agent can take a step, read the result and decide the next. Open it with the page options that should apply to every answer, then send steps:
+
+```bash
+curl -s localhost:8000/v1/session -H 'Content-Type: application/json' -d '{"url": "https://example.com/search"}'
+curl -s localhost:8000/v1/session/<id>/step -H 'Content-Type: application/json' \
+  -d '{"steps": [{"action": "type", "selector": "#q", "text": "sourdough"}, {"action": "press", "key": "Enter"}]}'
+curl -s -X DELETE localhost:8000/v1/session/<id>
+```
+
+Each session has its own browser context; cookies never leak between sessions and are gone when it closes. Sessions close after `PDC_SESSION_TTL_S` without use and after `PDC_SESSION_MAX_AGE_S` in any case; at most `PDC_MAX_SESSIONS` are open at once. Session pages are never cached, and robots.txt applies to every page a session goes to.
+
 ## Errors
 
 | Code | HTTP | Meaning |
@@ -211,6 +228,9 @@ Set with environment variables, or in a `.env` file in the working directory.
 | `PDC_BULK_CONCURRENCY` | 8 | Pages bulk jobs fetch at the same time, across all bulk jobs |
 | `PDC_SEARCH_PROVIDER` | `brave` | The search provider for find: `brave` (the web) or `local` (pages already fetched) |
 | `PDC_BRAVE_API_KEY` | unset | Key for the [Brave Search API](https://brave.com/search/api/), the default search provider |
+| `PDC_SESSION_TTL_S` | 300 | A browser session closes after this long without use |
+| `PDC_SESSION_MAX_AGE_S` | 1 800 | A browser session closes after this long in any case |
+| `PDC_MAX_SESSIONS` | 4 | Browser sessions open at once |
 | `PDC_LLM_PROVIDER` | unset | `anthropic`, `azure_openai` or `ollama`, for summaries and structured extraction. Unset: those features are off |
 | `PDC_LLM_MODEL` | provider default | Model name; for Azure OpenAI the deployment name. Anthropic defaults to `claude-sonnet-5-5` |
 | `PDC_ANTHROPIC_API_KEY` | unset | Key for the Anthropic API |
