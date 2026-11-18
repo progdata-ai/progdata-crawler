@@ -4,7 +4,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
-from progdata_crawler.models.options import PathFilter, Scope
+from progdata_crawler.models.options import PathFilter, Retention, Scope
 
 MAX_DISCOVER_LIMIT = 50_000
 
@@ -23,6 +23,8 @@ class DiscoverRequest(BaseModel):
     links: bool = True
     """Read the links on the start page."""
     limit: int = Field(default=1_000, ge=1, le=MAX_DISCOVER_LIMIT)
+    retain: Retention = Retention.DEFAULT
+    """`none` stores nothing: the start page read for its links is not cached."""
 
 
 class UrlSource(StrEnum):

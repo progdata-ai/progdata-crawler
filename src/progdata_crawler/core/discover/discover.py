@@ -126,7 +126,9 @@ async def discover(crawler: Crawler, request: DiscoverRequest) -> DiscoverResult
     if request.links:
         try:
             outcome = await crawler.fetch(
-                FetchRequest.model_validate({"url": start, "outputs": [Output.LINKS]})
+                FetchRequest.model_validate(
+                    {"url": start, "outputs": [Output.LINKS], "retain": request.retain}
+                )
             )
         except CrawlerError:
             if not found.items:
