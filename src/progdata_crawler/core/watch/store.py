@@ -112,6 +112,20 @@ class WatchStore:
             ).fetchall()
         return [self._row(row) for row in rows]
 
+    def claim(self, watch: Watch, lease_s: float) -> bool:
+        """Take a due watch for checking, so other processes sharing this database skip
+        it: `next_check_at` moves `lease_s` ahead, but only if no one changed it since
+        `watch` was read. Atomic across processes. If the claimer dies, the lease runs
+        out and the watch is due again."""
+        with self._lock:
+            return (
+                self._db.execute(
+                    "UPDATE watches SET next_check_at = ? WHERE id = ? AND next_check_at = ?",
+                    (self._clock() + lease_s, watch.id, watch.next_check_at),
+                ).rowcount
+                == 1
+            )
+
     def next_due_at(self) -> float | None:
         with self._lock:
             row = self._db.execute("SELECT MIN(next_check_at) FROM watches").fetchone()

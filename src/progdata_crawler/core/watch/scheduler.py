@@ -30,6 +30,10 @@ from progdata_crawler.models.watch import CheckStatus, Watch, WatchCheck, WatchC
 
 log = logging.getLogger(__name__)
 
+CLAIM_LEASE_S = 10 * 60
+"""How long a claimed watch is left to the process that claimed it. Longer than any fetch
+may take; if that process dies, the watch is due again after this."""
+
 CLEANUP_INTERVAL_S = 60 * 60
 """How often the scheduler deletes old versions."""
 
@@ -129,9 +133,17 @@ class WatchService:
         return await self._check(await self.get(watch_id))
 
     async def check_due(self) -> list[WatchCheck]:
-        """Check every watch that is due, one after another."""
-        due = await asyncio.to_thread(self._store.due)
-        return [await self._check(watch) for watch in due if watch.id not in self._checking]
+        """Check every watch that is due, one after another. Each is claimed first, so
+        when several processes share the data directory (`serve`, an MCP server per Claude
+        client, `pdc watch`), every due watch is checked by exactly one of them."""
+        checks: list[WatchCheck] = []
+        for watch in await asyncio.to_thread(self._store.due):
+            if watch.id in self._checking:
+                continue
+            if not await asyncio.to_thread(self._store.claim, watch, CLAIM_LEASE_S):
+                continue  # another process took it
+            checks.append(await self._check(watch))
+        return checks
 
     async def _check(self, watch: Watch) -> WatchCheck:
         self._checking.add(watch.id)
