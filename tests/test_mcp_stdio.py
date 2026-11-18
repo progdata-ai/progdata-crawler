@@ -16,7 +16,8 @@ from tests.support.site_server import SiteServer
 def server_parameters(tmp_path: Path) -> StdioServerParameters:
     env = {
         "PATH": os.environ.get("PATH", ""),
-        "HOME": str(tmp_path),
+        # Keep the real HOME: Playwright finds its browsers under ~/.cache.
+        "HOME": os.environ.get("HOME", str(tmp_path)),
         "PDC_DATA_DIR": str(tmp_path / "data"),
         "PDC_RATE_LIMIT_INTERVAL_S": "0.1",
         "PDC_LOG_LEVEL": "WARNING",
