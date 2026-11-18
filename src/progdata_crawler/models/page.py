@@ -1,5 +1,7 @@
 """What we return for a page: one field per requested output."""
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from progdata_crawler.models.envelope import ErrorInfo
@@ -60,6 +62,8 @@ class Page(_Model):
     """PNG, base64-encoded."""
     summary: str | None = None
     """A short summary written by the LLM, in the page's own language."""
+    structured: dict[str, Any] | None = None
+    """Data extracted by the LLM, matching the requested schema."""
     output_errors: dict[str, ErrorInfo] | None = None
     """Outputs that could not be made, by output name (for example `summary` when no LLM
     is configured). The rest of the page is fine."""

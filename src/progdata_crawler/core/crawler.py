@@ -55,6 +55,7 @@ from progdata_crawler.core.polite.ratelimit import BACKOFF_STATUSES, DomainRateL
 from progdata_crawler.core.polite.robots import RobotsPolicy, RobotsRules
 from progdata_crawler.core.store.cache import PageCache
 from progdata_crawler.core.store.sqlite import PageStore
+from progdata_crawler.core.structure.extract import extract
 from progdata_crawler.core.structure.llm import Llm, create_llm
 from progdata_crawler.models.convert import ConvertResult
 from progdata_crawler.models.envelope import Envelope, ErrorCode, ErrorInfo, Meta
@@ -69,7 +70,7 @@ log = logging.getLogger(__name__)
 PAGE_TYPES = HTML_TYPES | DOCUMENT_TYPES | GENERIC_TYPES
 """What fetch accepts: HTML pages, and documents it converts to markdown."""
 
-NOT_YET_AVAILABLE = frozenset({Output.STRUCTURED, Output.DIFF})
+NOT_YET_AVAILABLE = frozenset({Output.DIFF})
 """Outputs that later phases add."""
 
 
@@ -104,6 +105,11 @@ def _check_outputs(options: PageOptions) -> None:
             ErrorCode.INVALID_REQUEST,
             f"these outputs are not available yet: {', '.join(unavailable)}",
             outputs=unavailable,
+        )
+    if Output.STRUCTURED in options.outputs and options.structure is None:
+        raise CrawlerError(
+            ErrorCode.INVALID_REQUEST,
+            "the structured output needs `structure`: a schema and an instruction",
         )
 
 
@@ -245,8 +251,8 @@ class Crawler:
 
         source = await self._fetch_source(url, options)
         page = await asyncio.to_thread(build_page, source, options)
-        if Output.SUMMARY in options.outputs:
-            page = await self._add_summary(page, source, options)
+        if Output.SUMMARY in options.outputs or Output.STRUCTURED in options.outputs:
+            page = await self._add_llm_outputs(page, source, options)
         # A page with a missing output is not cached, so the next request tries again
         # (for example once an LLM is configured).
         if cacheable and not page.output_errors:
@@ -259,7 +265,10 @@ class Crawler:
             self._llm = create_llm(self.settings, robots=self.check_robots)
         return self._llm
 
-    async def _add_summary(self, page: Page, source: _Source, options: PageOptions) -> Page:
+    async def _text_for_llm(
+        self, page: Page, source: _Source, options: PageOptions
+    ) -> tuple[str, str | None]:
+        """The page's markdown and title, made for the LLM when they were not asked for."""
         markdown = page.markdown
         if markdown is None:
             markdown = (
@@ -275,12 +284,35 @@ class Crawler:
             title = source.document.title
         else:
             title = (await asyncio.to_thread(extract_metadata, source.html, source.url)).title
+        return markdown, title
+
+    async def _add_llm_outputs(self, page: Page, source: _Source, options: PageOptions) -> Page:
+        """Add `summary` and `structured`. A failure goes into `output_errors`; the rest
+        of the page is returned as usual."""
+        markdown, title = await self._text_for_llm(page, source, options)
+        update: dict[str, object] = {}
+        errors = dict(page.output_errors or {})
         try:
-            summary = await summarize(self.llm(), markdown, title=title)
-        except CrawlerError as error:
-            errors = {**(page.output_errors or {}), Output.SUMMARY.value: error.to_error_info()}
-            return page.model_copy(update={"output_errors": errors})
-        return page.model_copy(update={"summary": summary})
+            llm = self.llm()
+            if Output.SUMMARY in options.outputs:
+                try:
+                    update["summary"] = await summarize(llm, markdown, title=title)
+                except CrawlerError as error:
+                    errors[Output.SUMMARY.value] = error.to_error_info()
+            if Output.STRUCTURED in options.outputs and options.structure is not None:
+                try:
+                    update["structured"] = await extract(
+                        llm, markdown, options.structure, title=title
+                    )
+                except CrawlerError as error:
+                    errors[Output.STRUCTURED.value] = error.to_error_info()
+        except CrawlerError as error:  # no LLM configured
+            for output in (Output.SUMMARY, Output.STRUCTURED):
+                if output in options.outputs:
+                    errors[output.value] = error.to_error_info()
+        if errors:
+            update["output_errors"] = errors
+        return page.model_copy(update=update)
 
     async def fetch_document(
         self,
@@ -381,7 +413,7 @@ class Crawler:
     async def _document_source(self, response: HttpResponse, options: PageOptions) -> _Source:
         """Convert a document response, when markdown or a summary is asked for."""
         document = None
-        if Output.MARKDOWN in options.outputs or Output.SUMMARY in options.outputs:
+        if {Output.MARKDOWN, Output.SUMMARY, Output.STRUCTURED} & set(options.outputs):
             document = await convert_bytes(
                 response.content,
                 source=response.url,

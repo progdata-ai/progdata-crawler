@@ -9,6 +9,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.163.2",
     "httpx[http2]>=0.28.1",
+    "jsonschema>=4.26.0",
     "markitdown[docx,pdf,xlsx]>=0.1.9",
     "mcp>=2.3.0",
     "playwright>=1.65.2",
