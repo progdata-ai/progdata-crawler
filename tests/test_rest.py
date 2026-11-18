@@ -5,7 +5,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from progdata_crawler.api.rest import create_app
+from progdata_crawler.models import SearchSource
 from progdata_crawler.settings import Settings
+from tests.support.fake_search import FakeSearch, web_hits
 from tests.support.site_server import SiteServer
 
 
@@ -136,3 +138,29 @@ def test_query(client: TestClient, test_site: SiteServer) -> None:
     hits = response.json()["data"]["hits"]
     assert [hit["url"] for hit in hits] == [test_site.url("/article.html")]
     assert client.post("/v1/query", json={"query": ""}).status_code == 422
+
+
+def test_find_fetches_the_hits(tmp_path: Path, test_site: SiteServer) -> None:
+    test_site.add("/robots.txt", "User-agent: *\n", content_type="text/plain")
+    provider = FakeSearch(
+        {SearchSource.WEB: web_hits(test_site.url("/article.html"), test_site.url("/docs/"))}
+    )
+    settings = Settings(data_dir=tmp_path, rate_limit_interval_s=0.1)
+    app = create_app(settings, store_path=":memory:", search_provider=provider)
+    with TestClient(app) as test_client:
+        response = test_client.post(
+            "/v1/find", json={"query": "baking", "fetch": {"outputs": ["markdown"]}}
+        )
+    assert provider.closed
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["provider"] == "fake"
+    markdown = [hit["page"]["markdown"] for hit in data["hits"]]
+    assert markdown[0].startswith("# How we bake our sourdough")
+    assert len(markdown) == 2 and all(markdown)
+
+
+def test_find_without_a_configured_provider(client: TestClient) -> None:
+    response = client.post("/v1/find", json={"query": "baking"})
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "search_unavailable"
