@@ -114,6 +114,10 @@ class JobManager:
             raise _not_found(job_id)
         return job
 
+    async def view_job(self, job_id: str) -> Job:
+        """The job. Raises `not_found`."""
+        return await self._existing(job_id)
+
     async def _existing(self, job_id: str) -> Job:
         job = await self.get(job_id)
         if job is None:
