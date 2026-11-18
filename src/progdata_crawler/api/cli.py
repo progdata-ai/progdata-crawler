@@ -1,8 +1,10 @@
 """Command-line interface: `progdata-crawler`, also installed as `pdc`."""
 
 import asyncio
+import contextlib
 import json
 import sys
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -23,9 +25,11 @@ from progdata_crawler.core.find import create_provider, find
 from progdata_crawler.core.jobs.events import job_events
 from progdata_crawler.core.jobs.handlers import job_handlers
 from progdata_crawler.core.jobs.manager import JobManager
+from progdata_crawler.core.jobs.notify import create_notifier
 from progdata_crawler.core.store.query import query_pages
 from progdata_crawler.core.structure.llm import LlmAnswer, create_llm
 from progdata_crawler.core.structure.service import structure
+from progdata_crawler.core.watch.scheduler import WatchService
 from progdata_crawler.log import configure_logging
 from progdata_crawler.models import (
     BulkRequest,
@@ -55,6 +59,7 @@ from progdata_crawler.models import (
     TimeRange,
 )
 from progdata_crawler.models.structure_request import StructureRequest, StructureResult
+from progdata_crawler.models.watch import CheckStatus, Watch, WatchCheck, WatchCreate
 from progdata_crawler.settings import Settings, get_settings
 
 app = typer.Typer(
@@ -640,6 +645,123 @@ async def _llm_check(settings: Settings) -> LlmAnswer[str]:
             prompt=LLM_CHECK_PROMPT,
             output_type=str,
         )
+
+
+watch_app = typer.Typer(help="Watch pages for changes.", no_args_is_help=True)
+app.add_typer(watch_app, name="watch")
+
+
+def _print_check(check: WatchCheck) -> None:
+    line = f"{check.status.value:9} {check.url}"
+    if check.status is CheckStatus.CHANGED:
+        line += f"  (+{check.added_lines} -{check.removed_lines})"
+    if check.error is not None:
+        line += f"  {check.error.code.value}: {check.error.message}"
+    typer.echo(line)
+    if check.diff:
+        typer.echo(check.diff)
+
+
+def _print_watch(watch: Watch) -> None:
+    status = watch.last_status.value if watch.last_status else "not checked"
+    typer.echo(f"{watch.id}  every {watch.interval_s} s  {status:11}  {watch.url}")
+
+
+async def _with_watches[T](
+    settings: Settings, work: Callable[[WatchService], Awaitable[T]], *, schedule: bool = False
+) -> T:
+    async with (
+        Crawler(settings) as crawler,
+        WatchService(crawler, create_notifier(settings), schedule=schedule) as watches,
+    ):
+        return await work(watches)
+
+
+def _watch_settings() -> Settings:
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_format)
+    return _local(settings)
+
+
+def _run_watch_command[T](work: Callable[[WatchService], Awaitable[T]]) -> T:
+    try:
+        return asyncio.run(_with_watches(_watch_settings(), work))
+    except CrawlerError as error:
+        typer.echo(f"Error ({error.code.value}): {error.message}", err=True)
+        raise typer.Exit(1) from error
+
+
+@watch_app.command("add")
+def watch_add(
+    url: Annotated[str, typer.Argument(help="The page to watch.")],
+    every: Annotated[int, typer.Option(help="Seconds between checks (at least 300).")] = 3600,
+    notify_url: Annotated[
+        str | None, typer.Option(help="Receives a signed POST with the diff on change.")
+    ] = None,
+    output: OutputOption = None,
+) -> None:
+    """Start watching a page; it is checked right away."""
+    fields: dict[str, Any] = {"url": url, "interval_s": every, "notify_url": notify_url}
+    if output:
+        fields["outputs"] = output
+    try:
+        request = WatchCreate.model_validate(fields)
+    except ValidationError as error:
+        raise _invalid_options(error) from error
+
+    async def work(watches: WatchService) -> WatchCheck:
+        watch = await watches.add(request)
+        typer.echo(f"Watching {watch.url} as {watch.id}")
+        return await watches.check(watch.id)
+
+    _print_check(_run_watch_command(work))
+
+
+@watch_app.command("list")
+def watch_list() -> None:
+    """List the watches."""
+    for watch in _run_watch_command(lambda watches: watches.all()):
+        _print_watch(watch)
+
+
+@watch_app.command("check")
+def watch_check(
+    watch_id: Annotated[
+        str | None, typer.Argument(help="Check this watch now. Without it: every due watch.")
+    ] = None,
+) -> None:
+    """Check watches once: one by id, or all that are due (for cron)."""
+
+    async def work(watches: WatchService) -> list[WatchCheck]:
+        if watch_id is not None:
+            return [await watches.check(watch_id)]
+        return await watches.check_due()
+
+    checks = _run_watch_command(work)
+    if not checks:
+        typer.echo("No watches are due.", err=True)
+    for check in checks:
+        _print_check(check)
+
+
+@watch_app.command("remove")
+def watch_remove(watch_id: Annotated[str, typer.Argument(help="The watch to remove.")]) -> None:
+    """Stop watching a page and delete the versions kept for it."""
+    watch = _run_watch_command(lambda watches: watches.remove(watch_id))
+    typer.echo(f"Removed {watch.id} ({watch.url})")
+
+
+@watch_app.command("run")
+def watch_run() -> None:
+    """Keep checking watches as they fall due, until stopped with Ctrl+C."""
+
+    async def forever(watches: WatchService) -> None:
+        typer.echo("Checking watches as they fall due. Stop with Ctrl+C.", err=True)
+        await asyncio.Event().wait()
+
+    settings = _watch_settings()
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(_with_watches(settings, forever, schedule=True))
 
 
 @app.command(name="query")

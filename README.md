@@ -43,6 +43,7 @@ The MCP server gives Claude these tools:
 | `pdc_convert` | A PDF, DOCX or XLSX document at a URL as markdown |
 | `pdc_session` | Use a page step by step in a browser session that stays open |
 | `pdc_structure` | Extract data that fits a JSON Schema from one or more pages |
+| `pdc_watch` | Watch pages and see what changed |
 | `pdc_discover` | List a site's URLs from its sitemaps and start page |
 | `pdc_harvest` | Crawl a site within `max_pages` and `max_depth` (a job) |
 | `pdc_bulk` | Fetch many URLs in parallel (a job) |
@@ -137,6 +138,7 @@ curl -s http://127.0.0.1:8000/v1/fetch \
 | `POST /v1/session/{id}/step` | Run steps in the session and get the page back |
 | `DELETE /v1/session/{id}` | Close a session |
 | `POST /v1/structure?wait_s=` | Extract data against a JSON Schema: one URL directly, several as a job |
+| `POST /v1/watch`, `GET /v1/watch[/{id}]`, `POST /v1/watch/{id}/check`, `DELETE /v1/watch/{id}` | Watch pages for changes |
 | `POST /v1/query` | Search pages fetched before |
 
 Harvest and bulk answer with the job right away, or after up to `wait_s` seconds with its first results. Read all results by passing `next_cursor` back as `cursor` until `complete` is true.
@@ -157,7 +159,7 @@ The same options work in the CLI, the MCP tool and the REST API.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `outputs` | `markdown`, `metadata` | Any of `markdown`, `html` (cleaned), `raw_html`, `links`, `images`, `metadata`, `screenshot` (base64 PNG), `summary` and `structured` (written by the LLM; see below) |
+| `outputs` | `markdown`, `metadata` | Any of `markdown`, `html` (cleaned), `raw_html`, `links`, `images`, `metadata`, `screenshot` (base64 PNG), `summary` and `structured` (written by the LLM; see below), `diff` (against the last stored version) |
 | `content` | `main` | `main` for the main content only, `full` for the whole page |
 | `tags` | none | CSS selectors: `include` keeps only those elements, `exclude` removes them |
 | `render` | `auto` | When to use the browser: `auto` (when the page needs JavaScript), `always`, `never` |
@@ -293,6 +295,20 @@ pdc llm-check
 ```
 
 Page content is sent to the provider you choose, so pick one whose terms fit your data; a local Ollama keeps everything on your machine. Prompts and page content are never logged, only the provider, model, token counts and time. Calls to hosted APIs are checked against the API host's robots.txt like any other request.
+
+## Watching pages
+
+A watch fetches a page on a schedule (every `interval_s` seconds, at least 300), compares its markdown with the last version and keeps a version when it changed:
+
+```bash
+pdc watch add https://example.com/prices --every 3600 --notify-url https://hooks.example.com/prices
+pdc watch list
+pdc watch check            # check every due watch once, for example from cron
+pdc watch run              # keep checking as watches fall due
+pdc watch remove <id>      # stop, and delete the kept versions
+```
+
+`serve` and `mcp` check due watches while they run. A change is sent to `notify_url` as a signed webhook (`watch.changed`, see Webhooks) with a unified diff. Every check is a fresh fetch through the usual robots.txt and rate-limit rules, and stores the page, so local search (`PDC_SEARCH_PROVIDER=local`, `pdc query`) stays current for the pages you watch.
 
 ## Webhooks
 

@@ -14,6 +14,7 @@ import json
 import logging
 import time
 from collections.abc import Sequence
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -21,6 +22,7 @@ import httpx
 from progdata_crawler.core.errors import CrawlerError
 from progdata_crawler.core.fetch.guard import AddressGuard, guarded_client
 from progdata_crawler.models.jobs import Job, JobStatus
+from progdata_crawler.settings import Settings
 
 log = logging.getLogger(__name__)
 
@@ -85,6 +87,10 @@ class WebhookNotifier:
     def enabled(self) -> bool:
         return self._secret is not None
 
+    async def check_url(self, url: str) -> None:
+        """Raise `address_not_allowed` for receivers the address guard refuses."""
+        await self._guard.check_url(url)
+
     def notify(self, job: Job) -> None:
         """Send the job's current status to its `notify_url`, if it has one."""
         url = job.request.get("notify_url")
@@ -95,14 +101,23 @@ class WebhookNotifier:
         task.add_done_callback(self._tasks.discard)
 
     async def deliver(self, url: str, job: Job) -> bool:
-        """Send one webhook, with retries. True when the receiver answered 2xx."""
+        """Send one job webhook, with retries. True when the receiver answered 2xx."""
+        payload = {"job": job.model_dump(mode="json", exclude={"request"})}
+        return await self.send(url, event_name(job.status), payload, subject=job.id)
+
+    def notify_event(self, url: str, event: str, payload: dict[str, Any], *, subject: str) -> None:
+        """Send any event in the background (for example a watch change)."""
+        if self._secret is None:
+            return
+        task = asyncio.create_task(self.send(url, event, payload, subject=subject))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def send(self, url: str, event: str, payload: dict[str, Any], *, subject: str) -> bool:
+        """Sign and POST `{"event": event, **payload}`, with retries. True on 2xx."""
         assert self._secret is not None
-        event = event_name(job.status)
-        body = json.dumps(
-            {"event": event, "job": job.model_dump(mode="json", exclude={"request"})},
-            separators=(",", ":"),
-        ).encode()
-        context = {"job_id": job.id, "event": event, "host": urlsplit(url).hostname}
+        body = json.dumps({"event": event, **payload}, separators=(",", ":")).encode()
+        context = {"subject": subject, "event": event, "host": urlsplit(url).hostname}
         started = time.monotonic()
         for attempt in range(len(self._retry_delays_s) + 1):
             if attempt:
@@ -147,3 +162,13 @@ class WebhookNotifier:
                 task.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
         await self._client.aclose()
+
+
+def create_notifier(settings: Settings) -> WebhookNotifier:
+    """The notifier for jobs and watches, configured from settings."""
+    secret = settings.webhook_secret
+    return WebhookNotifier(
+        secret.get_secret_value() if secret is not None else None,
+        settings.user_agent,
+        AddressGuard(allow_private=bool(settings.allow_private_networks)),
+    )

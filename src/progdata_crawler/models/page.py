@@ -62,6 +62,9 @@ class Page(_Model):
     """PNG, base64-encoded."""
     summary: str | None = None
     """A short summary written by the LLM, in the page's own language."""
+    diff: str | None = None
+    """Unified diff of the markdown against the last stored version of the page: empty
+    when nothing changed, unset when no earlier version is stored."""
     structured: dict[str, Any] | None = None
     """Data extracted by the LLM, matching the requested schema."""
     output_errors: dict[str, ErrorInfo] | None = None
