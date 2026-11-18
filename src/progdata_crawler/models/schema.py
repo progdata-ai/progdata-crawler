@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from progdata_crawler.models.envelope import ErrorInfo, Meta
 from progdata_crawler.models.fetch import FetchRequest
 from progdata_crawler.models.options import PageOptions, PathFilter, SelectorFilter
+from progdata_crawler.models.page import Image, Link, Page, PageMetadata
 
 PUBLIC_MODELS: tuple[type[BaseModel], ...] = (
     FetchRequest,
@@ -15,6 +16,10 @@ PUBLIC_MODELS: tuple[type[BaseModel], ...] = (
     PathFilter,
     Meta,
     ErrorInfo,
+    Page,
+    PageMetadata,
+    Link,
+    Image,
 )
 
 
