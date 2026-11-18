@@ -143,3 +143,18 @@ def test_discover_json(test_site: SiteServer) -> None:
     body = json.loads(result.stdout)
     assert len(body["data"]["urls"]) == 2
     assert body["data"]["truncated"] is True
+
+
+@pytest.mark.usefixtures("cli_env")
+def test_query_searches_fetched_pages(test_site: SiteServer) -> None:
+    assert runner.invoke(app, ["fetch", test_site.url("/article.html")]).exit_code == 0
+    result = runner.invoke(app, ["query", "sourdough", "bake"])
+    assert result.exit_code == 0, result.output
+    assert test_site.url("/article.html") in result.stdout
+    assert "How we bake our sourdough" in result.stdout
+
+    as_json = json.loads(runner.invoke(app, ["query", "sourdough", "--json"]).stdout)
+    assert as_json["data"]["hits"][0]["url"] == test_site.url("/article.html")
+
+    none = runner.invoke(app, ["query", "zebra"])
+    assert none.exit_code == 0 and none.stdout == ""

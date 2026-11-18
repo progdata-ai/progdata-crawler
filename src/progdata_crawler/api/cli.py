@@ -9,6 +9,8 @@ from pydantic import ValidationError
 from progdata_crawler import __version__
 from progdata_crawler.core.crawler import Crawler
 from progdata_crawler.core.discover import discover_envelope
+from progdata_crawler.core.envelopes import enveloped
+from progdata_crawler.core.store.query import query_pages
 from progdata_crawler.log import configure_logging
 from progdata_crawler.models import (
     ContentMode,
@@ -19,6 +21,8 @@ from progdata_crawler.models import (
     FetchRequest,
     Output,
     Page,
+    QueryRequest,
+    QueryResult,
     RenderMode,
     Retention,
     Scope,
@@ -220,6 +224,43 @@ def discover(
 async def _discover(settings: Settings, request: DiscoverRequest) -> Envelope[DiscoverResult]:
     async with Crawler(settings) as crawler:
         return await discover_envelope(crawler, request)
+
+
+@app.command(name="query")
+def query_command(
+    words: Annotated[list[str], typer.Argument(help="Words to look for. All must match.")],
+    limit: Annotated[int, typer.Option(help="Most hits to return.")] = 10,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print the full response envelope as JSON.")
+    ] = False,
+) -> None:
+    """Search the content of pages fetched before. Fetches nothing."""
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_format)
+    try:
+        request = QueryRequest(query=" ".join(words), limit=limit)
+    except ValidationError as error:
+        typer.echo(f"Invalid options: {error.errors()[0]['msg']}", err=True)
+        raise typer.Exit(2) from error
+
+    envelope = asyncio.run(_query(settings, request))
+
+    if as_json:
+        typer.echo(envelope.model_dump_json(indent=2, exclude_none=True))
+    elif envelope.error is not None:
+        typer.echo(f"Error ({envelope.error.code.value}): {envelope.error.message}", err=True)
+    elif envelope.data is not None:
+        if not envelope.data.hits:
+            typer.echo("No matches.", err=True)
+        for hit in envelope.data.hits:
+            typer.echo(f"{hit.title or hit.url}\n  {hit.url}\n  {hit.snippet}\n")
+    if envelope.error is not None:
+        raise typer.Exit(1)
+
+
+async def _query(settings: Settings, request: QueryRequest) -> Envelope[QueryResult]:
+    async with Crawler(settings) as crawler:
+        return await enveloped(QueryResult, query_pages(crawler.store, request))
 
 
 @app.command()
