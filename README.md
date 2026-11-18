@@ -84,6 +84,7 @@ pdc fetch https://example.com/ --json                 # the full response envelo
 pdc fetch https://example.com/ --include article --exclude .ads
 pdc fetch https://example.com/ -o screenshot --full-page --json
 pdc fetch https://example.com/ --no-store             # store nothing after the response
+pdc fetch https://example.com/report.pdf             # PDF, DOCX and XLSX become markdown too
 ```
 
 ```bash
@@ -161,7 +162,7 @@ The same options work in the CLI, the MCP tool and the REST API.
 | `rate_limited` | 429 | The site asked us to slow down. `Retry-After` says when to try again |
 | `fetch_timeout` | 504 | The page did not respond within `timeout_ms` |
 | `fetch_failed` | 502 | DNS failure, refused connection, broken TLS, too many redirects |
-| `unsupported_type` | 415 | Not an HTML page, or larger than 10 MB |
+| `unsupported_type` | 415 | Neither an HTML page nor a PDF, DOCX or XLSX document, a damaged document, or larger than 10 MB |
 | `search_unavailable` | 503 | Web search is not configured (no API key), or the search provider failed |
 | `not_found` | 404 | No job with this id, or it has been deleted |
 | `internal_error` | 500 | Something went wrong on our side |

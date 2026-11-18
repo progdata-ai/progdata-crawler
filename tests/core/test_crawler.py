@@ -8,7 +8,8 @@ from progdata_crawler.core import crawler as crawler_module
 from progdata_crawler.core.crawler import Crawler
 from progdata_crawler.models import ErrorCode, FetchRequest, Output, RenderMode, Retention
 from progdata_crawler.settings import Settings
-from tests.support.site_server import SiteServer
+from tests.support.documents import build_docx, build_xlsx
+from tests.support.site_server import PDF_TEXT, SiteServer
 
 ROBOTS = "User-agent: *\nDisallow: /private/\n"
 
@@ -182,3 +183,43 @@ async def test_only_requested_outputs(crawler: Crawler, test_site: SiteServer) -
     assert envelope.data is not None
     assert envelope.data.links is not None
     assert envelope.data.markdown is None and envelope.data.metadata is None
+
+
+async def test_documents_become_markdown(crawler: Crawler, test_site: SiteServer) -> None:
+    pdf = await crawler.fetch_envelope(request(test_site.url("/files/sample.pdf")))
+    assert pdf.error is None and pdf.data is not None
+    assert pdf.data.markdown == PDF_TEXT
+    assert pdf.data.metadata is not None
+    assert (pdf.data.metadata.status, pdf.data.metadata.content_type) == (200, "application/pdf")
+
+    docx_url = test_site.add(
+        "/files/notes.docx", build_docx(), content_type="application/octet-stream"
+    )
+    docx = await crawler.fetch_envelope(request(docx_url, outputs=["markdown", "links", "html"]))
+    assert docx.data is not None and docx.data.markdown is not None
+    assert docx.data.markdown.startswith("# Baking notes")
+    # Outputs that describe an HTML page stay empty for documents.
+    assert (docx.data.links, docx.data.html) == (None, None)
+
+    xlsx_url = test_site.add(
+        "/files/recipe",
+        build_xlsx(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    xlsx = await crawler.fetch_envelope(request(xlsx_url))
+    assert xlsx.data is not None and xlsx.data.markdown is not None
+    assert "| Rye | 300 |" in xlsx.data.markdown
+
+    cached = await crawler.fetch_envelope(request(test_site.url("/files/sample.pdf")))
+    assert cached.meta.cached and cached.data == pdf.data
+
+
+async def test_other_files_are_still_unsupported(crawler: Crawler, test_site: SiteServer) -> None:
+    image = test_site.add("/files/pixel.png", b"\x89PNG\r\n\x1a\n", content_type="image/png")
+    blob = test_site.add("/files/blob", b"\x00\x01\x02", content_type="application/octet-stream")
+    for url in (image, blob):
+        envelope = await crawler.fetch_envelope(request(url))
+        assert envelope.error is not None
+        assert envelope.error.code is ErrorCode.UNSUPPORTED_TYPE
+    metadata_only = await crawler.fetch_envelope(request(blob, outputs=["metadata"]))
+    assert metadata_only.error is not None

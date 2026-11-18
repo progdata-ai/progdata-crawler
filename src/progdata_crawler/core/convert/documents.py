@@ -10,15 +10,18 @@ import io
 import logging
 import zipfile
 from pathlib import PurePosixPath
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from markitdown import MarkItDown, StreamInfo
 from markitdown.converters import DocxConverter, PdfConverter, XlsxConverter
 
-from progdata_crawler.core.crawler import Crawler
 from progdata_crawler.core.errors import CrawlerError
 from progdata_crawler.models.convert import ConvertResult, DocumentType
 from progdata_crawler.models.envelope import ErrorCode
+
+if TYPE_CHECKING:
+    from progdata_crawler.core.crawler import Crawler
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +37,9 @@ CONTENT_TYPES: dict[str, DocumentType] = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": DocumentType.XLSX,
 }
 """Content types that are documents, by their media type."""
+
+DOCUMENT_TYPES = frozenset(CONTENT_TYPES)
+"""Media types that are documents."""
 
 GENERIC_TYPES = frozenset({"application/octet-stream", "binary/octet-stream"})
 """Content types servers often send for any file; the content decides then."""
@@ -135,15 +141,16 @@ async def convert_bytes(
     return ConvertResult(source=source, type=kind, markdown=markdown, title=title or None)
 
 
-async def convert_url(crawler: Crawler, url: str) -> ConvertResult:
+async def convert_url(crawler: "Crawler", url: str) -> ConvertResult:
     """Fetch the document at `url` politely and convert it."""
     response = await crawler.fetch_document(
         url,
-        accept_types=frozenset(CONTENT_TYPES) | GENERIC_TYPES,
+        accept_types=DOCUMENT_TYPES | GENERIC_TYPES,
         max_bytes=MAX_DOCUMENT_BYTES,
     )
-    content_type = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
-    name = PurePosixPath(urlsplit(response.url).path).name or None
     return await convert_bytes(
-        response.content, source=response.url, content_type=content_type, name=name
+        response.content,
+        source=response.url,
+        content_type=response.content_type,
+        name=PurePosixPath(urlsplit(response.url).path).name or None,
     )
