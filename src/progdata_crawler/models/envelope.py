@@ -19,6 +19,8 @@ class ErrorCode(StrEnum):
     """The page did not respond within the time limit."""
     FETCH_FAILED = "fetch_failed"
     """The page could not be fetched: DNS failure, refused connection, broken TLS and so on."""
+    ADDRESS_NOT_ALLOWED = "address_not_allowed"
+    """The URL points at an internal network address, which this service may not fetch."""
     BLOCKED_BY_SITE = "blocked_by_site"
     """The site refused automated access. We do not retry with other techniques."""
     UNSUPPORTED_TYPE = "unsupported_type"
@@ -40,6 +42,7 @@ _HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.RATE_LIMITED: 429,
     ErrorCode.FETCH_TIMEOUT: 504,
     ErrorCode.FETCH_FAILED: 502,
+    ErrorCode.ADDRESS_NOT_ALLOWED: 403,
     ErrorCode.BLOCKED_BY_SITE: 502,
     ErrorCode.UNSUPPORTED_TYPE: 415,
     ErrorCode.QUOTA_EXCEEDED: 429,

@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 
 from progdata_crawler import __version__
 from progdata_crawler.api.cli import app
-from progdata_crawler.settings import get_settings
+from progdata_crawler.settings import Settings, get_settings
 from tests.support.site_server import SiteServer
 
 runner = CliRunner()
@@ -111,3 +111,13 @@ def test_fetch_rejects_invalid_options() -> None:
     result = runner.invoke(app, ["fetch", "not a url"])
     assert result.exit_code == 2
     assert "Invalid options" in result.stderr
+
+
+def test_network_defaults_per_entry_point() -> None:
+    from progdata_crawler.api.cli import _local, _shared  # pyright: ignore[reportPrivateUsage]
+
+    unset = Settings(allow_private_networks=None)
+    assert _local(unset).allow_private_networks is True
+    assert _shared(unset).allow_private_networks is False
+    explicit = Settings(allow_private_networks=False)
+    assert _local(explicit).allow_private_networks is False

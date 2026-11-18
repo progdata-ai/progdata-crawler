@@ -117,7 +117,7 @@ def fetch(
         typer.echo(f"Invalid options: {error.errors()[0]['msg']}", err=True)
         raise typer.Exit(2) from error
 
-    envelope = asyncio.run(_fetch(settings, request))
+    envelope = asyncio.run(_fetch(_local(settings), request))
 
     if as_json:
         typer.echo(envelope.model_dump_json(indent=2, exclude_none=True))
@@ -132,6 +132,20 @@ def fetch(
 async def _fetch(settings: Settings, request: FetchRequest) -> Envelope[Page]:
     async with Crawler(settings) as crawler:
         return await crawler.fetch_envelope(request)
+
+
+def _local(settings: Settings) -> Settings:
+    """Entry points that run on the user's own machine may fetch internal addresses."""
+    if settings.allow_private_networks is None:
+        return settings.model_copy(update={"allow_private_networks": True})
+    return settings
+
+
+def _shared(settings: Settings) -> Settings:
+    """Entry points that others can reach refuse internal addresses unless told otherwise."""
+    if settings.allow_private_networks is None:
+        return settings.model_copy(update={"allow_private_networks": False})
+    return settings
 
 
 def _human_readable(page: Page) -> str:
@@ -154,7 +168,7 @@ def mcp(
 
     settings = get_settings()
     configure_logging(settings.log_level, settings.log_format)  # logs go to stderr
-    server = create_server(settings)
+    server = create_server(_shared(settings) if http else _local(settings))
     if http:
         server.run("streamable-http", host=host, port=port)
     else:
@@ -173,4 +187,4 @@ def serve(
 
     settings = get_settings()
     configure_logging(settings.log_level, settings.log_format)
-    uvicorn.run(create_app(settings), host=host, port=port, log_level="warning")
+    uvicorn.run(create_app(_shared(settings)), host=host, port=port, log_level="warning")

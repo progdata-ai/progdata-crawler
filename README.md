@@ -121,6 +121,7 @@ The same options work in the CLI, the MCP tool and the REST API.
 | --- | --- | --- |
 | `invalid_request` | 422 | The request failed validation |
 | `robots_disallowed` | 403 | robots.txt does not allow the URL |
+| `address_not_allowed` | 403 | The URL points at an internal network address (see `PDC_ALLOW_PRIVATE_NETWORKS`) |
 | `blocked_by_site` | 502 | The site refused to serve us (401, 403, 451). We do not retry around it |
 | `rate_limited` | 429 | The site asked us to slow down. `Retry-After` says when to try again |
 | `fetch_timeout` | 504 | The page did not respond within `timeout_ms` |
@@ -137,6 +138,7 @@ Set with environment variables, or in a `.env` file in the working directory.
 | `PDC_DATA_DIR` | `~/.progdata-crawler` | Where the SQLite cache lives |
 | `PDC_TIMEOUT_MS` | 30 000 | Default time limit per page |
 | `PDC_RATE_LIMIT_INTERVAL_S` | 1.0 | Minimum seconds between requests to the same host |
+| `PDC_ALLOW_PRIVATE_NETWORKS` | unset | Whether internal addresses (127.0.0.1, 10.x, 169.254.169.254 …) may be fetched. Unset: allowed for the CLI and MCP over stdio, refused for `serve` and `mcp --http` |
 | `PDC_ROBOTS_ALLOWLIST` | `[]` | JSON list of domains where robots.txt is not applied, for our own sites or sites that gave us permission |
 | `PDC_BROWSER_EXECUTABLE` | unset | Use this Chromium instead of the one Playwright installs |
 | `PDC_BROWSER_MAX_PAGES` | 4 | Pages the browser may render at the same time |

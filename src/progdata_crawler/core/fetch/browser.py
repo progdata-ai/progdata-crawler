@@ -17,13 +17,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Self
+from urllib.parse import urljoin
 
-from playwright.async_api import Browser, BrowserContext, Playwright, async_playwright
+from playwright.async_api import Browser, BrowserContext, Playwright, Route, async_playwright
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from progdata_crawler.core.errors import CrawlerError
-from progdata_crawler.core.fetch.http import HTML_TYPES
+from progdata_crawler.core.fetch.guard import AddressGuard
+from progdata_crawler.core.fetch.http import HTML_TYPES, MAX_REDIRECTS
 from progdata_crawler.models.envelope import ErrorCode
 from progdata_crawler.models.options import Device
 
@@ -77,7 +79,11 @@ class BrowserPool:
         *,
         max_pages: int = 4,
         executable_path: Path | None = None,
+        guard: AddressGuard | None = None,
     ) -> None:
+        """With a `guard` that does not allow private networks, every request the browser
+        makes (the page, its redirects and everything it loads) is checked."""
+        self._guard = guard
         self._user_agent = user_agent
         self._executable_path = executable_path
         self._pages = asyncio.Semaphore(max_pages)
@@ -137,8 +143,42 @@ class BrowserPool:
             accept_downloads=False,
             extra_http_headers={"Accept-Language": locale} if locale else None,
         )
+        if self._guard is not None and not self._guard.allow_private:
+            await context.route("**/*", self._check_request)
         self.contexts_created += 1
         return context
+
+    async def _check_request(self, route: Route) -> None:
+        """Check every request the browser makes, including each step of a redirect chain.
+
+        The browser follows redirects on its own without passing them through this
+        handler, so the chain is followed here, one checked step at a time. The browser
+        then gets either the final response or a single redirect to a URL that has
+        already been checked.
+        """
+        assert self._guard is not None
+        requested = url = route.request.url
+        try:
+            for _ in range(MAX_REDIRECTS + 1):
+                await self._guard.check_url(url)
+                response = await route.fetch(url=url, max_redirects=0)
+                location = response.headers.get("location")
+                if not (300 <= response.status < 400 and location):
+                    break
+                url = urljoin(url, location)
+            else:
+                await route.abort("failed")
+                return
+        except CrawlerError:
+            await route.abort("blockedbyclient")
+            return
+        except PlaywrightError:
+            await route.abort("failed")
+            return
+        if url != requested:
+            await route.fulfill(status=302, headers={"location": url})
+        else:
+            await route.fulfill(response=response)
 
     async def _return_context(
         self, context: BrowserContext, device: Device, locale: str | None
@@ -190,6 +230,12 @@ class BrowserPool:
                     url=url,
                 ) from exc
             except PlaywrightError as exc:
+                if "ERR_BLOCKED_BY_CLIENT" in exc.message:
+                    raise CrawlerError(
+                        ErrorCode.ADDRESS_NOT_ALLOWED,
+                        "requests to internal network addresses are not allowed",
+                        url=url,
+                    ) from exc
                 raise CrawlerError(
                     ErrorCode.FETCH_FAILED,
                     f"the browser could not load the page: {exc.message.splitlines()[0]}",
