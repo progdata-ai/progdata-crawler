@@ -43,6 +43,8 @@ async def test_lists_the_fetch_tool(tmp_path: Path, test_site: SiteServer) -> No
     assert [tool.name for tool in tools] == [
         "pdc_fetch",
         "pdc_query",
+        "pdc_find",
+        "pdc_convert",
         "pdc_discover",
         "pdc_harvest",
         "pdc_bulk",

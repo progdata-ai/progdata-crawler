@@ -39,6 +39,8 @@ The MCP server gives Claude these tools:
 | Tool | What it does |
 | --- | --- |
 | `pdc_fetch` | Fetch one page as markdown and other outputs |
+| `pdc_find` | Search the web; with `fetch` also read the hits |
+| `pdc_convert` | A PDF, DOCX or XLSX document at a URL as markdown |
 | `pdc_discover` | List a site's URLs from its sitemaps and start page |
 | `pdc_harvest` | Crawl a site within `max_pages` and `max_depth` (a job) |
 | `pdc_bulk` | Fetch many URLs in parallel (a job) |
@@ -88,6 +90,9 @@ pdc fetch https://example.com/report.pdf             # PDF, DOCX and XLSX become
 ```
 
 ```bash
+pdc find "sourdough starter" --fetch                  # search and read the hits
+pdc find "bakery" -s news --time-range week --json
+pdc convert report.pdf                                # a local file or a URL
 pdc discover https://example.com/ --include-path '^/docs/'   # one URL per line
 pdc harvest https://example.com/docs/ --max-pages 50 --max-depth 2 --json   # JSON lines
 pdc bulk https://example.com/a https://example.com/b
@@ -113,6 +118,9 @@ curl -s http://127.0.0.1:8000/v1/fetch \
 | Endpoint | What it does |
 | --- | --- |
 | `POST /v1/fetch` | Fetch one page |
+| `POST /v1/find` | Search the web, optionally fetching the hits |
+| `POST /v1/convert` | Convert the document at a URL to markdown |
+| `POST /v1/convert/file?name=` | Convert an uploaded document (the request body, up to 25 MB) |
 | `POST /v1/discover` | List a site's URLs |
 | `POST /v1/harvest?wait_s=` | Start a crawl job |
 | `POST /v1/bulk?wait_s=` | Start a job that fetches many URLs |
