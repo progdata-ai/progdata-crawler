@@ -39,6 +39,12 @@ Pin third-party GitHub Actions to a full commit SHA, with the version in a comme
 - **Politeness is not optional.** Respect robots.txt, rate limit per domain and use an honest User-Agent. No proxy rotation, fingerprint spoofing, CAPTCHA solving or other ways around blocking. When a site blocks us, return `blocked_by_site`.
 - **Errors.** The core raises `progdata_crawler.core.errors.CrawlerError` with an `ErrorCode` for every expected failure. Entry points turn it into their own format. `tests/test_architecture.py` fails if the core imports from `api/` or from CLI, REST or MCP frameworks.
 
+## Testing
+
+Tests that need a website use the `test_site` fixture: a local site on 127.0.0.1 (see `tests/support/site_server.py`). It serves static pages from `tests/support/site/` (an article with boilerplate around it, a JS-only page, a docs section, a page disallowed by robots.txt) and generated routes: `/robots.txt`, `/sitemap.xml`, `/slow?ms=N`, `/status/<code>` (with `Retry-After` on 429 and 503), `/redirect?to=<path>`, `/echo/headers` and `/files/sample.pdf`.
+
+Add test-specific pages with `test_site.add(path, body)`. They are removed after each test. Test pages are written from scratch.
+
 ## Git workflow
 
 - One branch and one pull request per issue.
