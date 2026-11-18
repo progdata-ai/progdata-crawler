@@ -1572,6 +1572,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx", extra = ["http2"] },
+    { name = "jsonschema" },
     { name = "markitdown", extra = ["docx", "pdf", "xlsx"] },
     { name = "mcp" },
     { name = "playwright" },
@@ -1601,6 +1602,7 @@ licenses = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.163.2" },
     { name = "httpx", extras = ["http2"], specifier = ">=0.28.1" },
+    { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "markitdown", extras = ["docx", "pdf", "xlsx"], specifier = ">=0.1.9" },
     { name = "mcp", specifier = ">=2.3.0" },
     { name = "playwright", specifier = ">=1.65.2" },

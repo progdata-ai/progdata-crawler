@@ -147,7 +147,7 @@ The same options work in the CLI, the MCP tool and the REST API.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `outputs` | `markdown`, `metadata` | Any of `markdown`, `html` (cleaned), `raw_html`, `links`, `images`, `metadata`, `screenshot` (base64 PNG), `summary` (written by the LLM; see below) |
+| `outputs` | `markdown`, `metadata` | Any of `markdown`, `html` (cleaned), `raw_html`, `links`, `images`, `metadata`, `screenshot` (base64 PNG), `summary` and `structured` (written by the LLM; see below) |
 | `content` | `main` | `main` for the main content only, `full` for the whole page |
 | `tags` | none | CSS selectors: `include` keeps only those elements, `exclude` removes them |
 | `render` | `auto` | When to use the browser: `auto` (when the page needs JavaScript), `always`, `never` |
@@ -158,6 +158,7 @@ The same options work in the CLI, the MCP tool and the REST API.
 | `cache_ttl` | 86 400 | Maximum age of a cached result in seconds; 0 always fetches fresh |
 | `full_page_screenshot` | false | Capture the whole page instead of the visible part |
 | `retain` | `default` | `none` stores nothing after the response |
+| `structure` | none | For `structured`: `{"schema": <JSON Schema>, "instruction": "..."}` |
 | `steps` | none | Browser steps after load: `click`, `type`, `press`, `scroll`, `wait`, `capture` (see below) |
 
 ### Browser steps
@@ -188,6 +189,7 @@ A `capture` step records the page at that point in `captures`. A step whose elem
 | `unsupported_type` | 415 | Neither an HTML page nor a PDF, DOCX or XLSX document, a damaged document, or larger than 10 MB |
 | `llm_unavailable` | 503 | The LLM is not configured, refused the request or did not answer in time |
 | `search_unavailable` | 503 | Web search is not configured (no API key), or the search provider failed |
+| `extraction_failed` | 502 | The LLM's answers did not fit the requested schema |
 | `step_failed` | 422 | A browser step could not be done, for example because its element was not found |
 | `not_found` | 404 | No job with this id, or it has been deleted |
 | `internal_error` | 500 | Something went wrong on our side |
@@ -242,7 +244,18 @@ Only pages you fetched can be found, and only as long as the retention settings 
 
 ## LLM
 
-Summaries and structured extraction use the LLM set with `PDC_LLM_PROVIDER`. With the `summary` output, every page (in fetch, harvest, bulk and find) gets a few sentences in its own language. Without an LLM the page still comes back, with the reason in `output_errors.summary`. Check that it works with:
+Summaries and structured extraction use the LLM set with `PDC_LLM_PROVIDER`. With the `summary` output, every page (in fetch, harvest, bulk and find) gets a few sentences in its own language. Without an LLM the page still comes back, with the reason in `output_errors.summary`.
+
+With the `structured` output and a `structure`, the LLM extracts data that fits your JSON Schema (draft 2020-12, an object at the top level):
+
+```json
+{"url": "https://example.com/product", "outputs": ["structured"],
+ "structure": {"instruction": "the product's price",
+   "schema": {"type": "object", "properties": {"price": {"type": "number"}, "currency": {"type": "string"}},
+              "required": ["price"]}}}
+```
+
+Every answer is validated against the schema. One that does not fit is sent back to the model with the problems, up to two more times; after that `output_errors.structured` says `extraction_failed` and what was wrong. Check that it works with:
 
 ```bash
 export PDC_LLM_PROVIDER=ollama PDC_LLM_MODEL=llama3.2   # or anthropic with PDC_ANTHROPIC_API_KEY

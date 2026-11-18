@@ -149,11 +149,11 @@ async def test_outputs_from_later_phases_are_rejected(
     crawler: Crawler, test_site: SiteServer
 ) -> None:
     envelope = await crawler.fetch_envelope(
-        request(test_site.url("/"), outputs=["markdown", "structured"])
+        request(test_site.url("/"), outputs=["markdown", "diff"])
     )
     assert envelope.error is not None
     assert envelope.error.code is ErrorCode.INVALID_REQUEST
-    assert envelope.error.details == {"outputs": ["structured"]}
+    assert envelope.error.details == {"outputs": ["diff"]}
 
 
 async def test_render_never_with_screenshot_is_rejected(
