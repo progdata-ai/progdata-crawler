@@ -66,8 +66,18 @@ class Settings(BaseSettings):
     """Chromium to use instead of the one Playwright installs. Leave unset normally."""
     browser_max_pages: int = Field(default=4, ge=1, le=32)
     """Pages the browser may render at the same time."""
+    retention_days: int = Field(default=7, ge=1, le=365)
+    """Cached pages and finished jobs older than this are deleted automatically."""
+    max_concurrent_jobs: int = Field(default=2, ge=1, le=32)
+    """Jobs (harvest, bulk) that run at the same time."""
     log_level: LogLevel = LogLevel.INFO
     log_format: LogFormat = LogFormat.TEXT
+
+    @computed_field
+    @property
+    def jobs_db_path(self) -> Path:
+        """The SQLite database for jobs and their results."""
+        return self.data_dir / "jobs.sqlite3"
 
     @computed_field
     @property
