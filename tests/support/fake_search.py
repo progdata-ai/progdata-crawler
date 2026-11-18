@@ -5,6 +5,7 @@ from progdata_crawler.models.find import FindRequest, SearchHit, SearchSource
 
 class FakeSearch:
     name = "fake"
+    sources = frozenset(SearchSource)
 
     def __init__(self, hits: dict[SearchSource, list[SearchHit]] | None = None) -> None:
         self.hits = hits or {}

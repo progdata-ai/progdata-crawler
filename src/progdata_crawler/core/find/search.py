@@ -7,7 +7,9 @@ from progdata_crawler.core.crawler import Crawler
 from progdata_crawler.core.errors import CrawlerError
 from progdata_crawler.core.fetch.guard import AddressGuard
 from progdata_crawler.core.find.brave import BraveSearch, RobotsCheck
+from progdata_crawler.core.find.local import LocalSearch
 from progdata_crawler.core.find.provider import SearchProvider
+from progdata_crawler.core.store.sqlite import PageStore
 from progdata_crawler.core.urls import UrlDeduplicator
 from progdata_crawler.models.envelope import ErrorCode, ErrorInfo
 from progdata_crawler.models.fetch import FetchRequest
@@ -18,9 +20,10 @@ from progdata_crawler.settings import SearchProviderName, Settings
 log = logging.getLogger(__name__)
 
 
-def create_provider(settings: Settings, robots: RobotsCheck) -> SearchProvider:
-    """The provider `PDC_SEARCH_PROVIDER` names. Calls to it go through the address guard,
-    and `robots` (normally `Crawler.check_robots`) checks each against robots.txt."""
+def create_provider(settings: Settings, *, robots: RobotsCheck, store: PageStore) -> SearchProvider:
+    """The provider `PDC_SEARCH_PROVIDER` names. Calls to an API go through the address
+    guard, and `robots` (normally `Crawler.check_robots`) checks each against robots.txt.
+    The local provider searches `store` (normally `Crawler.store`)."""
     guard = AddressGuard(allow_private=bool(settings.allow_private_networks))
     match settings.search_provider:
         case SearchProviderName.BRAVE:
@@ -32,14 +35,20 @@ def create_provider(settings: Settings, robots: RobotsCheck) -> SearchProvider:
                 robots=robots,
                 api_url=settings.brave_api_url,
             )
+        case SearchProviderName.LOCAL:
+            return LocalSearch(store)
 
 
 async def search(provider: SearchProvider, request: FindRequest) -> FindResult:
     """Search every requested source at once. Hits are in source order, without duplicate
     pages (images keep their own entries, since one page can hold many images)."""
-    per_source = await asyncio.gather(
-        *(provider.search(request, source) for source in request.sources)
+    supported = [source for source in request.sources if source in provider.sources]
+    notes = tuple(
+        f"the {provider.name} search provider has no {source.value} index"
+        for source in request.sources
+        if source not in provider.sources
     )
+    per_source = await asyncio.gather(*(provider.search(request, source) for source in supported))
     seen = UrlDeduplicator()
     hits: list[SearchHit] = []
     for source_hits in per_source:
@@ -47,7 +56,7 @@ async def search(provider: SearchProvider, request: FindRequest) -> FindResult:
             key = hit.image_url if hit.source is SearchSource.IMAGES and hit.image_url else hit.url
             if seen.add(key):
                 hits.append(hit)
-    return FindResult(query=request.query, provider=provider.name, hits=tuple(hits))
+    return FindResult(query=request.query, provider=provider.name, hits=tuple(hits), notes=notes)
 
 
 async def find(crawler: Crawler, provider: SearchProvider, request: FindRequest) -> FindResult:

@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS pages (
     page_json  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS pages_fetched_at ON pages (fetched_at);
+CREATE INDEX IF NOT EXISTS pages_url ON pages (url);
 CREATE VIRTUAL TABLE IF NOT EXISTS page_text USING fts5(
     url UNINDEXED,
     title,
@@ -143,8 +144,11 @@ class PageStore:
 
         await self._run(work)
 
-    async def search(self, text: str, *, limit: int = 10) -> list[SearchHit]:
-        """Full-text search in stored pages, best matches first."""
+    async def search(
+        self, text: str, *, limit: int = 10, since: float | None = None
+    ) -> list[SearchHit]:
+        """Full-text search in stored pages, best matches first. With `since` (Unix time),
+        only pages fetched at or after it."""
         query = fts_query(text)
         if not query:
             return []
@@ -152,14 +156,27 @@ class PageStore:
         def work(db: sqlite3.Connection) -> list[tuple[str, str, str, float]]:
             return db.execute(
                 "SELECT url, title, snippet(page_text, 2, '[', ']', '…', 16), fetched_at "
-                "FROM page_text WHERE page_text MATCH ? ORDER BY rank LIMIT ?",
-                (query, limit),
+                "FROM page_text WHERE page_text MATCH ? AND fetched_at >= ? "
+                "ORDER BY rank LIMIT ?",
+                (query, since if since is not None else float("-inf"), limit),
             ).fetchall()
 
         rows = await self._run(work)
         return [
             SearchHit(url, title, snippet, fetched_at) for url, title, snippet, fetched_at in rows
         ]
+
+    async def latest_page(self, url: str) -> Page | None:
+        """The most recently stored result for `url`, whatever options it was fetched with."""
+
+        def work(db: sqlite3.Connection) -> tuple[str] | None:
+            return db.execute(
+                "SELECT page_json FROM pages WHERE url = ? ORDER BY fetched_at DESC LIMIT 1",
+                (url,),
+            ).fetchone()
+
+        row = await self._run(work)
+        return Page.model_validate_json(row[0]) if row is not None else None
 
     async def delete_older_than(self, max_age_s: float) -> int:
         """Delete results and indexed text older than `max_age_s`. Returns rows deleted."""

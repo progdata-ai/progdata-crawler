@@ -164,7 +164,9 @@ def create_server(
             Crawler(settings, store_path=store_path) as crawler,
             JobManager(settings, job_handlers(crawler), page_store=crawler.store) as jobs,
         ):
-            provider = search_provider or create_provider(settings, crawler.check_robots)
+            provider = search_provider or create_provider(
+                settings, robots=crawler.check_robots, store=crawler.store
+            )
             running["crawler"] = crawler
             running["jobs"] = jobs
             running["search"] = provider
