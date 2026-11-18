@@ -159,3 +159,18 @@ def mcp(
         server.run("streamable-http", host=host, port=port)
     else:
         server.run("stdio")
+
+
+@app.command()
+def serve(
+    host: Annotated[str, typer.Option(help="Interface to listen on.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port to listen on.")] = 8000,
+) -> None:
+    """Run the REST API (POST /v1/fetch, OpenAPI docs at /docs)."""
+    import uvicorn
+
+    from progdata_crawler.api.rest import create_app
+
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_format)
+    uvicorn.run(create_app(settings), host=host, port=port, log_level="warning")
