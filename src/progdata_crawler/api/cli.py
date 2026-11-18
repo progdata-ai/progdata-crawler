@@ -737,7 +737,9 @@ def watch_check(
     async def work(watches: WatchService) -> list[WatchCheck]:
         if watch_id is not None:
             return [await watches.check(watch_id)]
-        return await watches.check_due()
+        checks = await watches.check_due()
+        await watches.cleanup()  # cron runs this, so old versions go too
+        return checks
 
     checks = _run_watch_command(work)
     if not checks:

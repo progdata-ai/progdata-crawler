@@ -160,6 +160,19 @@ class WatchStore:
                 self._db.execute("ROLLBACK")
                 raise
 
+    def delete_versions_older_than(self, max_age_s: float) -> int:
+        """Delete versions older than `max_age_s`, but always keep the newest version of
+        each watch: it is what the next check compares with. Returns versions deleted."""
+        oldest = self._clock() - max_age_s
+        with self._lock:
+            return self._db.execute(
+                "DELETE FROM watch_versions WHERE checked_at < ? AND rowid NOT IN ("
+                " SELECT v.rowid FROM watch_versions v WHERE v.checked_at = ("
+                "  SELECT MAX(w.checked_at) FROM watch_versions w WHERE w.watch_id = v.watch_id"
+                " ))",
+                (oldest,),
+            ).rowcount
+
     def versions(self, watch_id: str) -> int:
         with self._lock:
             return self._db.execute(
