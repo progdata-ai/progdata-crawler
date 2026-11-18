@@ -45,11 +45,11 @@ jobs:
       # Only runtime dependencies are checked. Dev tools are not shipped with the package.
       - name: Install runtime dependencies
         run: uv sync --locked --no-dev --group licenses
-      # Allowed: MIT, BSD, Apache, PSF and MPL-2.0. MPL-2.0 packages are used unmodified.
+      # Allowed: MIT, BSD, Apache, ISC, PSF and MPL-2.0. MPL-2.0 packages are used unmodified.
       - name: Allow only permissive licenses
         run: >-
           uv run --no-sync pip-licenses
           --from=mixed
           --ignore-packages progdata-crawler
           --partial-match
-          --allow-only="MIT;BSD;Apache;Python Software Foundation;PSF-2.0;Mozilla Public License 2.0;MPL-2.0"
+          --allow-only="MIT;BSD;Apache;ISC;Python Software Foundation;PSF-2.0;Mozilla Public License 2.0;MPL-2.0"
