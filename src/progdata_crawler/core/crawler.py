@@ -20,10 +20,17 @@ import time
 import uuid
 from collections.abc import Collection
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import TracebackType
 from typing import Self
+from urllib.parse import urlsplit
 
+from progdata_crawler.core.convert.documents import (
+    DOCUMENT_TYPES,
+    GENERIC_TYPES,
+    convert_bytes,
+    detect_type,
+)
 from progdata_crawler.core.errors import CrawlerError
 from progdata_crawler.core.extract.clean_html import clean_html
 from progdata_crawler.core.extract.images import extract_images
@@ -37,18 +44,27 @@ from progdata_crawler.core.fetch.detect import (
     should_render_first,
 )
 from progdata_crawler.core.fetch.guard import AddressGuard
-from progdata_crawler.core.fetch.http import HttpFetcher, HttpResponse, raise_for_blocked
+from progdata_crawler.core.fetch.http import (
+    HTML_TYPES,
+    HttpFetcher,
+    HttpResponse,
+    raise_for_blocked,
+)
 from progdata_crawler.core.polite.ratelimit import BACKOFF_STATUSES, DomainRateLimiter
 from progdata_crawler.core.polite.robots import RobotsPolicy, RobotsRules
 from progdata_crawler.core.store.cache import PageCache
 from progdata_crawler.core.store.sqlite import PageStore
+from progdata_crawler.models.convert import ConvertResult
 from progdata_crawler.models.envelope import Envelope, ErrorCode, ErrorInfo, Meta
 from progdata_crawler.models.fetch import FetchRequest
 from progdata_crawler.models.options import Output, PageOptions
-from progdata_crawler.models.page import Page
+from progdata_crawler.models.page import Page, PageMetadata
 from progdata_crawler.settings import Settings
 
 log = logging.getLogger(__name__)
+
+PAGE_TYPES = HTML_TYPES | DOCUMENT_TYPES | GENERIC_TYPES
+"""What fetch accepts: HTML pages, and documents it converts to markdown."""
 
 NOT_YET_AVAILABLE = frozenset({Output.SUMMARY, Output.STRUCTURED, Output.DIFF})
 """Outputs that later phases add."""
@@ -71,6 +87,10 @@ class _Source:
     html: str
     rendered: bool
     screenshot: bytes | None = None
+    is_document: bool = False
+    """A PDF, DOCX or XLSX response rather than an HTML page."""
+    document: ConvertResult | None = None
+    """The converted document, when markdown was asked for."""
 
 
 def _check_outputs(options: PageOptions) -> None:
@@ -87,6 +107,8 @@ def build_page(source: _Source, options: PageOptions) -> Page:
     """Extract the requested outputs from a fetched document. CPU-bound."""
     wanted = set(options.outputs)
     html, url = source.html, source.url
+    if source.is_document:
+        return _document_page(source, wanted)
     return Page(
         url=url,
         markdown=(
@@ -112,6 +134,22 @@ def build_page(source: _Source, options: PageOptions) -> Page:
             if Output.SCREENSHOT in wanted and source.screenshot is not None
             else None
         ),
+    )
+
+
+def _document_page(source: _Source, wanted: set[Output]) -> Page:
+    """A PDF, DOCX or XLSX file: markdown and metadata. The outputs that describe an HTML
+    page (html, raw_html, links, images, screenshot) stay empty."""
+    document = source.document
+    metadata = PageMetadata(
+        title=document.title if document is not None else None,
+        status=source.status,
+        content_type=source.content_type,
+    )
+    return Page(
+        url=source.url,
+        markdown=document.markdown if document is not None and Output.MARKDOWN in wanted else None,
+        metadata=metadata if Output.METADATA in wanted else None,
     )
 
 
@@ -226,11 +264,19 @@ class Crawler:
         if should_render_first(options):
             return await self._render(url, options)
 
-        response = await self._http.fetch(url, timeout_ms=options.timeout_ms, locale=options.locale)
+        response = await self._http.fetch(
+            url,
+            timeout_ms=options.timeout_ms,
+            locale=options.locale,
+            accept_types=PAGE_TYPES,
+        )
         self._raise_if_throttled(url, response.status, response.headers.get("retry-after"))
         raise_for_blocked(response)
         if response.url != url:
             await self._robots.check(response.url)  # redirected: the target must allow us too
+
+        if response.content_type not in HTML_TYPES:
+            return await self._document_source(response, options)
 
         html = response.text()
         if should_render_after(options, html):
@@ -242,6 +288,32 @@ class Crawler:
             content_type=response.content_type,
             html=html,
             rendered=False,
+        )
+
+    async def _document_source(self, response: HttpResponse, options: PageOptions) -> _Source:
+        """Convert a document response. Markdown is only converted when asked for."""
+        document = None
+        if Output.MARKDOWN in options.outputs:
+            document = await convert_bytes(
+                response.content,
+                source=response.url,
+                content_type=response.content_type,
+                name=PurePosixPath(urlsplit(response.url).path).name or None,
+            )
+        elif detect_type(response.content, content_type=response.content_type) is None:
+            raise CrawlerError(
+                ErrorCode.UNSUPPORTED_TYPE,
+                "not an HTML page or a PDF, DOCX or XLSX document",
+                content_type=response.content_type,
+            )
+        return _Source(
+            url=response.url,
+            status=response.status,
+            content_type=response.content_type,
+            html="",
+            rendered=False,
+            is_document=True,
+            document=document,
         )
 
     async def _render(self, url: str, options: PageOptions) -> _Source:

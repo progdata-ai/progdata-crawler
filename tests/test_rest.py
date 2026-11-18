@@ -41,7 +41,7 @@ def test_request_id_is_passed_through(client: TestClient, test_site: SiteServer)
     [
         ("/private/staff.html", 403, "robots_disallowed"),
         ("/status/403", 502, "blocked_by_site"),
-        ("/files/sample.pdf", 415, "unsupported_type"),
+        ("/robots.txt", 415, "unsupported_type"),
     ],
 )
 def test_errors_use_envelope_and_status(
