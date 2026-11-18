@@ -25,6 +25,8 @@ class ErrorCode(StrEnum):
     """The site refused automated access. We do not retry with other techniques."""
     UNSUPPORTED_TYPE = "unsupported_type"
     """The content type cannot be handled."""
+    NOT_FOUND = "not_found"
+    """The job or other resource does not exist, or no longer exists."""
     QUOTA_EXCEEDED = "quota_exceeded"
     """The API key has used up its quota."""
     INTERNAL_ERROR = "internal_error"
@@ -45,6 +47,7 @@ _HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.ADDRESS_NOT_ALLOWED: 403,
     ErrorCode.BLOCKED_BY_SITE: 502,
     ErrorCode.UNSUPPORTED_TYPE: 415,
+    ErrorCode.NOT_FOUND: 404,
     ErrorCode.QUOTA_EXCEEDED: 429,
     ErrorCode.INTERNAL_ERROR: 500,
 }

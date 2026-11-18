@@ -68,3 +68,19 @@ class JobResult(BaseModel):
     url: str
     page: Page | None = None
     error: ErrorInfo | None = None
+
+
+MAX_RESULTS_PER_REQUEST = 1_000
+
+
+class JobView(BaseModel):
+    """A job's status and one page of its results."""
+
+    model_config = ConfigDict(frozen=True)
+
+    job: Job
+    results: tuple[JobResult, ...] = ()
+    next_cursor: int
+    """Pass as `cursor` to get the results after these."""
+    complete: bool
+    """True when the job has finished and every result has been returned."""
