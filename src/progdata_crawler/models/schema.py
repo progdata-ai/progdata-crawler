@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from progdata_crawler.models.bulk import BulkRequest
+from progdata_crawler.models.convert import ConvertRequest, ConvertResult
 from progdata_crawler.models.discover import DiscoveredUrl, DiscoverRequest, DiscoverResult
 from progdata_crawler.models.envelope import ErrorInfo, Meta
 from progdata_crawler.models.fetch import FetchRequest
@@ -19,6 +20,8 @@ PUBLIC_MODELS: tuple[type[BaseModel], ...] = (
     FindRequest,
     FindResult,
     SearchHit,
+    ConvertRequest,
+    ConvertResult,
     QueryRequest,
     QueryResult,
     QueryHit,
