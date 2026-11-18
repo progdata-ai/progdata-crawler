@@ -166,6 +166,10 @@ The same options work in the CLI, the MCP tool and the REST API.
 | `structure` | none | For `structured`: `{"schema": <JSON Schema>, "instruction": "..."}` |
 | `steps` | none | Browser steps after load: `click`, `type`, `press`, `scroll`, `wait`, `capture` (see below) |
 
+### Harvest with a goal
+
+With `goal` (for example `"pricing and plans"`), harvest asks the LLM to rank the links found so far and fetches the most relevant pages first. Only link texts and URLs are sent to the LLM. `goal_budget` (default 10) caps the LLM calls; when they are spent, or without an LLM, the crawl goes on breadth first. All other limits, robots.txt and the rate limit apply as usual.
+
 ### Browser steps
 
 `steps` lets you use a page before it is captured, for example to fill in a search form:
