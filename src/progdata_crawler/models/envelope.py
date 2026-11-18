@@ -17,6 +17,8 @@ class ErrorCode(StrEnum):
     """The target site asked us to slow down, or our own per-domain limit was hit."""
     FETCH_TIMEOUT = "fetch_timeout"
     """The page did not respond within the time limit."""
+    FETCH_FAILED = "fetch_failed"
+    """The page could not be fetched: DNS failure, refused connection, broken TLS and so on."""
     BLOCKED_BY_SITE = "blocked_by_site"
     """The site refused automated access. We do not retry with other techniques."""
     UNSUPPORTED_TYPE = "unsupported_type"
@@ -37,6 +39,7 @@ _HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.ROBOTS_DISALLOWED: 403,
     ErrorCode.RATE_LIMITED: 429,
     ErrorCode.FETCH_TIMEOUT: 504,
+    ErrorCode.FETCH_FAILED: 502,
     ErrorCode.BLOCKED_BY_SITE: 502,
     ErrorCode.UNSUPPORTED_TYPE: 415,
     ErrorCode.QUOTA_EXCEEDED: 429,
