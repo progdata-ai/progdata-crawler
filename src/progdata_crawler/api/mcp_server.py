@@ -22,8 +22,10 @@ from progdata_crawler.core.find import SearchProvider, create_provider, find
 from progdata_crawler.core.jobs.handlers import job_handlers
 from progdata_crawler.core.jobs.manager import JobManager
 from progdata_crawler.core.jobs.notify import create_notifier
+from progdata_crawler.core.research.agent import research
 from progdata_crawler.core.session.browser_session import SessionManager
 from progdata_crawler.core.store.query import query_pages
+from progdata_crawler.core.structure.llm import Llm
 from progdata_crawler.core.structure.service import structure as structure_data
 from progdata_crawler.core.watch.scheduler import WatchService
 from progdata_crawler.models import (
@@ -58,6 +60,7 @@ from progdata_crawler.models import (
     TimeRange,
 )
 from progdata_crawler.models.jobs import MAX_JOB_WAIT_S
+from progdata_crawler.models.research import ResearchAnswer, ResearchRequest
 from progdata_crawler.models.structure_request import StructureRequest, StructureResult
 from progdata_crawler.models.watch import WatchCreate, WatchResult
 from progdata_crawler.settings import Settings
@@ -201,6 +204,7 @@ def create_server(
     *,
     store_path: str | None = None,
     search_provider: SearchProvider | None = None,
+    llm: Llm | None = None,
 ) -> MCPServer[None]:
     """Build the MCP server. The crawler starts with the server and stops with it."""
     running: dict[str, Any] = {}
@@ -208,7 +212,7 @@ def create_server(
     @asynccontextmanager
     async def lifespan(_: MCPServer[None]) -> AsyncGenerator[None]:
         async with (
-            Crawler(settings, store_path=store_path) as crawler,
+            Crawler(settings, store_path=store_path, llm=llm) as crawler,
             JobManager(settings, job_handlers(crawler), page_store=crawler.store) as jobs,
             SessionManager(crawler) as sessions,
             WatchService(crawler, create_notifier(settings)) as watches,
@@ -472,6 +476,31 @@ def create_server(
                     return WatchResult(watch=await watches.remove(watch_id or ""))
 
         return await enveloped(WatchResult, act())
+
+    @server.tool(
+        name="pdc_research",
+        title="Research a question",
+        description=(
+            "Answer a question from the web: searches, reads the best pages and answers with "
+            "numbered sources, every one of them actually read. Use it for questions that "
+            "need several sources; use pdc_fetch for one known page."
+        ),
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+    )
+    async def pdc_research(  # pyright: ignore[reportUnusedFunction]
+        question: Annotated[str, Field(description="The question to answer.")],
+        max_pages: Annotated[int, Field(description="Most pages to read (1-40).")] = 8,
+        max_seconds: Annotated[
+            int, Field(description="Time for searching and reading (10-600 s).")
+        ] = 120,
+    ) -> Envelope[ResearchAnswer]:
+        try:
+            request = ResearchRequest(
+                question=question, max_pages=max_pages, max_seconds=max_seconds
+            )
+        except ValidationError as error:
+            return _invalid(ResearchAnswer, error)
+        return await enveloped(ResearchAnswer, research(crawler(), running["search"], request))
 
     @server.tool(
         name="pdc_discover",

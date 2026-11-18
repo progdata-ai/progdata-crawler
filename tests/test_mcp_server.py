@@ -47,6 +47,7 @@ async def test_lists_the_fetch_tool(tmp_path: Path, test_site: SiteServer) -> No
         "pdc_convert",
         "pdc_session",
         "pdc_watch",
+        "pdc_research",
         "pdc_discover",
         "pdc_harvest",
         "pdc_structure",

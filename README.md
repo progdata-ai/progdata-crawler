@@ -44,6 +44,7 @@ The MCP server gives Claude these tools:
 | `pdc_session` | Use a page step by step in a browser session that stays open |
 | `pdc_structure` | Extract data that fits a JSON Schema from one or more pages |
 | `pdc_watch` | Watch pages and see what changed |
+| `pdc_research` | Answer a question from the web, with the sources it read |
 | `pdc_discover` | List a site's URLs from its sitemaps and start page |
 | `pdc_harvest` | Crawl a site within `max_pages` and `max_depth` (a job) |
 | `pdc_bulk` | Fetch many URLs in parallel (a job) |
@@ -100,6 +101,7 @@ pdc structure https://example.com/product --schema price.json --instruction "the
 pdc fetch https://example.com/search --steps steps.json   # browser steps from a JSON file
 pdc harvest https://example.com/ --goal "pricing and plans" --max-pages 20
 pdc llm-check                                         # is the LLM set up?
+pdc research "How long does a sourdough starter take?"   # answer with sources
 pdc discover https://example.com/ --include-path '^/docs/'   # one URL per line
 pdc harvest https://example.com/docs/ --max-pages 50 --max-depth 2 --json   # JSON lines
 pdc bulk https://example.com/a https://example.com/b
@@ -139,6 +141,7 @@ curl -s http://127.0.0.1:8000/v1/fetch \
 | `DELETE /v1/session/{id}` | Close a session |
 | `POST /v1/structure?wait_s=` | Extract data against a JSON Schema: one URL directly, several as a job |
 | `POST /v1/watch`, `GET /v1/watch[/{id}]`, `POST /v1/watch/{id}/check`, `DELETE /v1/watch/{id}` | Watch pages for changes |
+| `POST /v1/research` | Answer a question with sources |
 | `POST /v1/query` | Search pages fetched before |
 
 Harvest and bulk answer with the job right away, or after up to `wait_s` seconds with its first results. Read all results by passing `next_cursor` back as `cursor` until `complete` is true.
@@ -309,6 +312,16 @@ pdc watch remove <id>      # stop, and delete the kept versions
 ```
 
 `serve` and `mcp` check due watches while they run. A change is sent to `notify_url` as a signed webhook (`watch.changed`, see Webhooks) with a unified diff. Every check is a fresh fetch through the usual robots.txt and rate-limit rules, and stores the page, so local search (`PDC_SEARCH_PROVIDER=local`, `pdc query`) stays current for the pages you watch.
+## Research
+
+`pdc research`, `POST /v1/research` and `pdc_research` answer a question from the web:
+
+1. The LLM writes a few search queries.
+2. The search provider runs them, and the best hits are fetched under the usual rules.
+3. The LLM answers from those pages only, citing them as `[n]`.
+4. Another round searches for anything still missing.
+
+Every source in the result was fetched and read; citations of anything else are removed and noted. `max_rounds`, `max_searches`, `max_pages` and `max_seconds` bound the work. With `PDC_SEARCH_PROVIDER=local` and Ollama it costs nothing, but it can only use pages you have fetched before.
 
 ## Webhooks
 
