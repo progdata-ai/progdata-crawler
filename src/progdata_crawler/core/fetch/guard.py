@@ -159,3 +159,26 @@ class GuardedTransport(httpx.AsyncHTTPTransport):
             http2=True,
             network_backend=GuardedBackend(guard),
         )
+
+
+def guarded_client(
+    guard: AddressGuard,
+    *,
+    user_agent: str,
+    timeout_s: float,
+    transport: httpx.AsyncBaseTransport | None = None,
+    headers: dict[str, str] | None = None,
+) -> httpx.AsyncClient:
+    """An httpx client for calls to other services (webhooks, search APIs). It does not
+    follow redirects, and with a guard that refuses private networks every connection
+    goes through `GuardedTransport`, ignoring proxy settings."""
+    guarded = not guard.allow_private
+    if transport is None and guarded:
+        transport = GuardedTransport(guard)
+    return httpx.AsyncClient(
+        transport=transport,
+        trust_env=not guarded,
+        follow_redirects=False,
+        timeout=timeout_s,
+        headers={"User-Agent": user_agent, **(headers or {})},
+    )

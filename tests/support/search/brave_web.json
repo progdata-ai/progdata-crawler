@@ -1,0 +1,28 @@
+{
+  "type": "search",
+  "query": {"original": "sourdough starter"},
+  "web": {
+    "type": "search",
+    "results": [
+      {
+        "title": "How to keep a <strong>sourdough starter</strong> alive",
+        "url": "https://bakery.example/starter",
+        "description": "Feed it flour &amp; water every day. A <strong>starter</strong> likes warmth.",
+        "page_age": "2026-10-02T08:00:00",
+        "age": "October 2, 2026"
+      },
+      {
+        "title": "Starter troubleshooting",
+        "url": "https://bakery.example/starter#faq",
+        "description": "Same page, other anchor."
+      },
+      {
+        "title": "Rye starters",
+        "url": "https://flour.example/rye",
+        "description": "Rye ferments faster than wheat."
+      },
+      {"title": "Broken entry without a URL"},
+      {"title": "Not a web URL", "url": "ftp://files.example/starter.txt"}
+    ]
+  }
+}

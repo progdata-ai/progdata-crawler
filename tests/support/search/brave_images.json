@@ -1,0 +1,16 @@
+{
+  "type": "images",
+  "results": [
+    {
+      "title": "A jar of starter",
+      "url": "https://bakery.example/starter",
+      "properties": {"url": "https://img.bakery.example/jar.jpg"},
+      "thumbnail": {"src": "https://thumbs.example/jar.jpg"}
+    },
+    {
+      "title": "Bubbles",
+      "url": "https://bakery.example/starter",
+      "properties": {"url": "https://img.bakery.example/bubbles.jpg"}
+    }
+  ]
+}

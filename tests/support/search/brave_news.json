@@ -1,0 +1,17 @@
+{
+  "type": "news",
+  "results": [
+    {
+      "title": "Bakeries report a <strong>sourdough</strong> boom",
+      "url": "https://news.example/sourdough-boom",
+      "description": "Sales are up this autumn.",
+      "age": "2 days ago",
+      "page_age": "2026-11-16T10:00:00"
+    },
+    {
+      "title": "Rye is back",
+      "url": "https://flour.example/rye",
+      "description": "Also a web result."
+    }
+  ]
+}
